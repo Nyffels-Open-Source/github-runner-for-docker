@@ -8,9 +8,9 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 WORKDIR /runner
 COPY activation-script.sh /runner/activation-script.sh
-COPY entrypoint.sh /
+COPY ./entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /runner/activation-script.sh
-RUN chmod +x ./entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-ENTRYPOINT ["/runner/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint.sh"]
