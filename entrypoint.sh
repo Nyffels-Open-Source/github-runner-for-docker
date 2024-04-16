@@ -1,2 +1,2 @@
-#!/usr/bin/dumb-init /bin/bash
-# shellcheck shell=bash
+#!/bin/sh
+echo "Hello world"

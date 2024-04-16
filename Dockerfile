@@ -8,5 +8,6 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 WORKDIR /runner
 COPY ./activation-script.sh /runner/activation-script.sh
+RUN ["chmod", "+x", "/runner/entrypoint.sh"]
 
-ENTRYPOINT ["/runner/activation-script.sh" ]
+ENTRYPOINT ["/runner/entrypoint.sh"]
