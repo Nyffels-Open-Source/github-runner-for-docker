@@ -6,8 +6,9 @@ RUN usermod -aG docker root
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+RUN mkdir /runner
 WORKDIR /runner
-COPY activation-script.sh /runner/activation-script.sh
+COPY ./activation-script.sh /runner/activation-script.sh
 COPY ./entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /runner/activation-script.sh
