@@ -7,17 +7,13 @@ jobs:
   get_version:
     runs-on: ubuntu-latest
     outputs: 
-      version: ${{ env.PACKAGE_VERSION }}
+      version: ${{ env.version }}
     steps: 
       - name: Set Calver Version 
-        uses: Nelyx/action-calver@v1.1.0
-        with: 
-          default_branch: 'refs/heads/main'
-          format: 'YYYYMMDD'
-          version_prefix: ''
+        uses: Nyffels-IT/github-actions-calver-version-generator@v1.0.0
 
       - name: Current verion 
-        run: 'echo Version: ${{ env.PACKAGE_VERSION }}'
+        run: 'echo Version: ${{ env.version }}'
 
   deploy: 
     runs-on: ubuntu-latest
