@@ -8,4 +8,4 @@ WORKDIR /runner
 COPY activation-script.sh /runner
 COPY entrypoint.sh /
 
-ENTRYPOINT [ "/entrypoint.sh" ]
+# ENTRYPOINT [ "/entrypoint.sh" ]
