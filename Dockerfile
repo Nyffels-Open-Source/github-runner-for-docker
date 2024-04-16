@@ -9,4 +9,4 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 WORKDIR /runner
 COPY ./activation-script.sh /runner/activation-script.sh
 
-SHELL ["/bin/bash", "/runner/activation-script.sh" ]
+ENTRYPOINT ["/runner/activation-script.sh" ]
