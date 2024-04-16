@@ -5,3 +5,5 @@ if test -f "./runner/run.sh"; then
   rm ./runner/run.sh
   echo "Activation-script completed"
 fi
+
+echo "completed"
