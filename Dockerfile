@@ -9,4 +9,4 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 WORKDIR /runner
 COPY activation-script.sh /runner
 
-RUN chmod +x /runner/activation-script.sh
+CMD /runner/activation-script.sh
