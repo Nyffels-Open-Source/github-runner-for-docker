@@ -1,5 +1,5 @@
 #!/bin/bash
-if test -f "./runner/run.sh"; then
+if test -f "./runner/activation-script.sh"; then
   echo "Activation-script found"
   /bin/bash ./runner/run.sh
   rm ./runner/run.sh
