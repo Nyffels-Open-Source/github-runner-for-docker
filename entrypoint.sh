@@ -1,9 +1,7 @@
 #!/bin/bash
 if [ -f "/runner/activation-script.sh" ]; then
-  echo "Activation-script found"
-  /bin/bash ./runner/run.sh
-  rm ./runner/run.sh
-  echo "Activation-script completed"
+  /bin/bash ./runner/activation-script.sh
+  rm ./runner/activation-script.sh
 else
   echo "Activation script not found."
 fi
