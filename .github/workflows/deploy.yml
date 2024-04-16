@@ -10,7 +10,7 @@ jobs:
       version: ${{ env.version }}
     steps: 
       - name: Set Calver Version 
-        uses: Nyffels-IT/github-actions-calver-version-generator@v1.0.0
+        uses: Nyffels-IT/github-actions-calver-version-generator@v1.0.1
 
       - name: Current verion 
         run: 'echo Version: ${{ env.version }}'
