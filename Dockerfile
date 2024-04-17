@@ -1,10 +1,12 @@
 FROM ubuntu:latest
 LABEL maintainer="chesney@nyffels.be"
 
-RUN apt-get update \
-  && apt install docker.io -y \
-  && apt install curl \
-  && apt install python3-pycurl
+RUN apt-get update
+
+RUN apt install docker.io -y
+RUN apt install curl -y
+RUN apt install python3-pycurl -y
+
 RUN usermod -aG docker root
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
