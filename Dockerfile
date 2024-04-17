@@ -5,7 +5,9 @@ ARG RUNNER_VERSION="2.315.0"
 ARG DEBIAN_FRONTEND=nointeractive
 
 RUN apt update -y && apt upgrade -y && useradd -m docker
-RUN apt install -y --no-install-recommends curl jq build-essential libssl-dev libffi-dev python3 python3-venv python3-dev python3-pip docker.io
+RUN apt install -y --no-install-recommends curl jq build-essential libssl-dev libffi-dev python3 python3-venv python3-dev python3-pip
+RUN apt install docker.io -y
+RUN usermod -ag docker $USER
 
 RUN cd /home/docker && mkdir actions-runner && cd actions-runner \
 && curl -O -L https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
