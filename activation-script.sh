@@ -1,5 +1,5 @@
 #!/bin/sh
-curl -L https://github.com/actions/runner/releases/download/v2.315.0/actions-runner-linux-x64-2.315.0.tar.gz > runner.tar.gz
-tar -xzf ./runner.tar.gz
-rm -f ./runner.tar.gz
-./config.sh --url https://github.com/moosj-be --token AHCZGP4GRM4MYPAOFVOYHMTGD3SYA
+cd /runner
+curl -s -o actions-runner-linux-x64-2.315.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.315.0/actions-runner-linux-x64-2.315.0.tar.gz
+tar xzf ./actions-runner-linux-x64-2.315.0.tar.gz
+./config.sh --url https://github.com/Nyffels-IT --token AHCZGP2OV2KUFLTNYLCPW6TGD5WMC
