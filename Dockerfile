@@ -6,7 +6,7 @@ RUN apt-get update
 RUN apt install docker.io -y
 RUN apt install curl -y
 RUN apt install python3-pycurl -y
-RUN sudo apt update && sudo apt -y install dotnet6
+RUN apt install dotnet6 -y
 
 RUN usermod -aG docker root
 
