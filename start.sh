@@ -1,10 +1,10 @@
 #!/bin/bash
 
 ORG=$ORG
-ACCESS_TOKEN=$TOKEN
+PAT=$PAT
 NAME=$NAME
 
-REG_TOKEN=$(curl -X POST -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Accept: application/vnd.github+json" https://api.github.com/orgs/${ORG}/actions/runners/registration-token | jq .token --raw-output)
+REG_TOKEN=$(curl -X POST -H "Authorization: Bearer ${PAT}" -H "Accept: application/vnd.github+json" https://api.github.com/orgs/${ORG}/actions/runners/registration-token | jq .token --raw-output)
 
 cd /home/docker/actions-runner
 
