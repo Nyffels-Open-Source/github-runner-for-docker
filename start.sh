@@ -5,8 +5,6 @@ PAT=$PAT
 
 REG_TOKEN=$(curl -X POST -H "Authorization: Bearer ${PAT}" -H "Accept: application/vnd.github+json" https://api.github.com/orgs/${ORG}/actions/runners/registration-token | jq .token --raw-output)
 
-echo "${REG_TOKEN}"
-
 cd /home/docker/actions-runner
 
 ./config.sh --unattended --url https://github.com/${ORG} --token ${REG_TOKEN}
