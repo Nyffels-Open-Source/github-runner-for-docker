@@ -13,7 +13,7 @@ RUN add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubunt
 RUN apt update
 RUN apt install docker-ce -y
 RUN usermod -aG docker docker
-RUN systemctl enable docker
+RUN systemctl status docker
 
 
 RUN cd /home/docker && mkdir actions-runner && cd actions-runner \
