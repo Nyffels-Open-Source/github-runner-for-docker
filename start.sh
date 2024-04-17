@@ -1,10 +1,9 @@
 #!/bin/bash
 
 ORG=$ORG
+PAT=$PAT
 
 systemctl status docker
-
-PAT=$PAT
 
 REG_TOKEN=$(curl -X POST -H "Authorization: Bearer ${PAT}" -H "Accept: application/vnd.github+json" https://api.github.com/orgs/${ORG}/actions/runners/registration-token | jq .token --raw-output)
 

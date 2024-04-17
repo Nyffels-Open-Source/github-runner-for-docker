@@ -20,6 +20,4 @@ RUN chmod +x start.sh
 
 USER docker
 
-RUN docker ps
-
 ENTRYPOINT ["./start.sh"]
