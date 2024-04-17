@@ -19,6 +19,7 @@ echo "Removing runner..."
 
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
+trap 'cleanup' SIGTERM
 
 echo "Starting runner..."
 ./run.sh & wait $!
