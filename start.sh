@@ -10,7 +10,7 @@ echo "${REG_TOKEN}"
 
 cd /home/docker/actions-runner
 
-./config.sh --unattended --url https://github.com/${REPO} --token ${REG_TOKEN} --name ${NAME} --replace
+./config.sh --unattended --token ${REG_TOKEN} --name ${NAME} --replace
 
 cleanup() {
 echo "Removing runner..."
