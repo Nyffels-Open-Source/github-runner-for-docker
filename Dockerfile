@@ -1,23 +1,20 @@
-FROM ubuntu:latest
-LABEL maintainer="chesney@nyffels.be"
+FROM ubuntu:22.04
 
-RUN apt-get update
+ARG RUNNER_VERSION="2.315.0"
+ARG DEBIAN_FRONTEND=nointeractive
 
-RUN apt install docker.io -y
-RUN apt install curl -y
-RUN apt install python3-pycurl -y
-RUN apt install dotnet6 -y
+RUN apt update -y && apt upgrade -y && useradd -m docker
+RUN apt install -y --no-install-recommends curl jq build-essential libssl-dev libffi-dev python3 python3-venv python3-dev python3-pip docker.io
 
 RUN usermod -aG docker root
 
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN cd /home/docker && mkdir actions-runner && cd actions-runner \
+&& curl -O -L https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
+&& tar xzf ./actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
 
-RUN mkdir /runner
-WORKDIR /runner
-COPY ./activation-script.sh /runner/activation-script.sh
-COPY ./entrypoint.sh /entrypoint.sh
+RUN chown -R docker ~docker && /home/docker/actions-runner/bin/installdependencies.sh
+COPY start.sh start.sh
+RUN chmod +x start.sh
+USER docker
 
-RUN chmod +x /runner/activation-script.sh
-RUN chmod +x /entrypoint.sh
-
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["./start.sh"]
