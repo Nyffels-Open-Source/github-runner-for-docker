@@ -2,14 +2,14 @@
 
 ORG=$ORG
 PAT=$PAT
-
-systemctl status docker
+NAME=$NAME
+ACTIONS_RUNNER_INPUT_REPLACE=true
 
 REG_TOKEN=$(curl -X POST -H "Authorization: Bearer ${PAT}" -H "Accept: application/vnd.github+json" https://api.github.com/orgs/${ORG}/actions/runners/registration-token | jq .token --raw-output)
 
 cd /home/docker/actions-runner
 
-./config.sh --unattended --url https://github.com/${ORG} --token ${REG_TOKEN} --replace
+./config.sh --unattended --url https://github.com/${ORG} --token ${REG_TOKEN} --name $NAME --replace
 
 cleanup() {
 echo "Removing runner..."
