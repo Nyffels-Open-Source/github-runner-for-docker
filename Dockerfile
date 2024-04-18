@@ -23,7 +23,11 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings
 RUN chmod a+r /etc/apt/keyrings/docker.asc
 RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
 RUN apt-get update
-RUN apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+RUN apt install docker-ce 
+RUN apt install docker-ce-cli 
+RUN apt install containerd.io 
+RUN apt install docker-buildx-plugin 
+RUN apt install docker-compose-plugin
 RUN docker run hello-world
 
 # Install github action runner
