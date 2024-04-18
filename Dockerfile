@@ -33,7 +33,6 @@ CMD ["wrapdocker"]
 
 # Workaround for ulimit error on docker usage
 RUN sed -i -e 's/ulimit -Hn/ulimit -n/g' /etc/init.d/docker
-RUN service docker start
 
 # Copy and set entrypoint
 COPY entrypoint.sh entrypoint.sh

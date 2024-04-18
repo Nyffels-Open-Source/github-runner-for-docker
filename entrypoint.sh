@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Start needed services
+service docker start
+
 # Environment variables
 ORG=$ORG
 PAT=$PAT
