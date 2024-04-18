@@ -9,12 +9,12 @@ REG_TOKEN=$(curl -X POST -H "Authorization: Bearer ${PAT}" -H "Accept: applicati
 
 cd /actions-runner
 
-echo $NAME
-RUNNER_ALLOW_RUNASROOT="1" ./config.sh --unattended --url https://github.com/${ORG} --token ${REG_TOKEN} --name $NAME --replace
+echo "Runner = ${$NAME}"
+RUNNER_ALLOW_RUNASROOT=true ./config.sh --unattended --url "https://github.com/${ORG}" --token $REG_TOKEN --name $NAME
 
 cleanup() {
 echo "Removing runner..."
-    ./config.sh remove --token ${REG_TOKEN}
+    ./config.sh remove --token $REG_TOKEN
 }
 
 trap 'cleanup; exit 130' INT
