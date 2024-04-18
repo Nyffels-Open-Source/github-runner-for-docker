@@ -1,4 +1,5 @@
 FROM ubuntu:22.04
+FROM docker:lastest
 
 ARG RUNNER_VERSION="2.315.0"
 
