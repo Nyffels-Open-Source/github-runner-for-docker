@@ -15,20 +15,10 @@ RUN apt install -y python3
 RUN apt install -y python3-venv 
 RUN apt install -y python3-dev 
 RUN apt install -y python3-pip
-RUN apt-get install ca-certificates
 
 # Install docker following the dockers documentation
-RUN install -m 0755 -d /etc/apt/keyrings
-RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-RUN chmod a+r /etc/apt/keyrings/docker.asc
-RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-RUN apt-get update
-RUN apt install docker-ce 
-RUN apt install docker-ce-cli 
-RUN apt install containerd.io 
-RUN apt install docker-buildx-plugin 
-RUN apt install docker-compose-plugin
-RUN docker run hello-world
+RUN curl -fsSL https://get.docker.com -o get-docker.sh
+RUN sh get-docker.sh
 
 # Install github action runner
 RUN cd /home/docker && mkdir actions-runner && cd actions-runner \
