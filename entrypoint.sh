@@ -13,7 +13,7 @@ REG_TOKEN=$(curl -X POST -H "Authorization: Bearer ${PAT}" -H "Accept: applicati
 
 # Run the script to create the runner
 cd /actions-runner
-./config.sh --unattended --url "https://github.com/${ORG}" --token $REG_TOKEN --name $NAME
+RUNNER_ALLOW_RUNASROOT="1" ./config.sh --unattended --url "https://github.com/${ORG}" --token $REG_TOKEN --name $NAME
 
 # Remove the runner on container end-of-live
 cleanup() {
@@ -27,4 +27,4 @@ trap 'cleanup' SIGTERM
 
 # Start the runner
 echo "Starting runner..."
-./run.sh & wait $!
+RUNNER_ALLOW_RUNASROOT="1" ./run.sh & wait $!
