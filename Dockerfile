@@ -15,16 +15,17 @@ RUN apt install -y python3
 RUN apt install -y python3-venv 
 RUN apt install -y python3-dev 
 RUN apt install -y python3-pip
+RUN apt install apt-utils
 
 # Install docker following the dockers documentation
 RUN curl -fsSL https://get.docker.com -o get-docker.sh
 RUN sh get-docker.sh
 
 # Install github action runner
-RUN cd /home/docker && mkdir actions-runner && cd actions-runner \
+RUN mkdir actions-runner && cd actions-runner \
 && curl -O -L https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
 && tar xzf ./actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
-RUN chown -R docker ~docker && /home/docker/actions-runner/bin/installdependencies.sh
+RUN /actions-runner/bin/installdependencies.sh
 
 # Copy and set entrypoint
 COPY entrypoint.sh entrypoint.sh
