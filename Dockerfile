@@ -15,11 +15,8 @@ RUN apt install -y python3
 RUN apt install -y python3-venv 
 RUN apt install -y python3-dev 
 RUN apt install -y python3-pip
-RUN apt install apt-utils
-
-# Install docker following the dockers documentation
-# RUN curl -fsSL https://get.docker.com -o get-docker.sh
-# RUN sh get-docker.sh
+RUN apt install -y apt-utils
+RUN apt install -y unzip 
 
 # Install github action runner
 RUN mkdir actions-runner && cd actions-runner \
@@ -27,16 +24,16 @@ RUN mkdir actions-runner && cd actions-runner \
 && tar xzf ./actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
 RUN /actions-runner/bin/installdependencies.sh
 
-# Workaround for ulimit error on docker usage
-# RUN sed -i -e 's/ulimit -Hn/ulimit -n/g' /etc/init.d/docker
-# RUN service docker start
-
 # Install docker
 RUN curl -sSL https://get.docker.com/ | sh
 ADD ./wrapdocker /usr/local/bin/wrapdocker
 RUN chmod +x /usr/local/bin/wrapdocker
 VOLUME /var/lib/docker
 CMD ["wrapdocker"]
+
+# Workaround for ulimit error on docker usage
+RUN sed -i -e 's/ulimit -Hn/ulimit -n/g' /etc/init.d/docker
+RUN service docker start
 
 # Copy and set entrypoint
 COPY entrypoint.sh entrypoint.sh
