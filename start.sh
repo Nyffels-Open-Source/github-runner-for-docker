@@ -10,7 +10,7 @@ REG_TOKEN=$(curl -X POST -H "Authorization: Bearer ${PAT}" -H "Accept: applicati
 cd /home/docker/actions-runner
 
 echo $NAME
-./config.sh --unattended --url https://github.com/${ORG} --token ${REG_TOKEN} --name $NAME --replace
+RUNNER_ALLOW_RUNASROOT=1 ./config.sh --unattended --url https://github.com/${ORG} --token ${REG_TOKEN} --name $NAME --replace
 
 cleanup() {
 echo "Removing runner..."
