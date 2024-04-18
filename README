@@ -1,5 +1,21 @@
 # Github Action Runner 
-A docker image to run a Github Action Runners in a docker environment. 
 
-## IN DEVELOPMENT 
-This image is in active Alpha development and not yet suited for production!
+Run a Github Actions Runner inside of a docker environment on an organisation level. This docker includes an internal docker instance. 
+
+# Installation 
+
+```bash
+  docker run --privileged --name github-runner --env=NAME=<NAME> --env=ORG=<ORG> --env=PAT=<PAT> -d nyffelsit/github-runner:latest
+```
+
+# Environments 
+
+NAME = Name of docker runner in github.
+ORG = ID of the organisation in github. 
+PAT = Personal access token of your user for requested runner tokens. 
+
+# Legal information
+This image is create by "Nyffels BV" under the MIT license. 
+
+# Contribution
+Feel free to branch / fork this repo and make adjustments. To merge in the master branch, please open a issue and a PR in the github repo. 
