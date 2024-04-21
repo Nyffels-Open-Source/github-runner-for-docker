@@ -15,7 +15,9 @@ export ACTIONS_RUNNER_INPUT_REPLACE
 export RUNNER_ALLOW_RUNASROOT
 
 # Fetch the runner registration token with a personal access token
+echo "Api URL: https://api.github.com/orgs/${ORG}/actions/runners/registration-token"
 REG_TOKEN=$(curl -X POST -H "Authorization: Bearer ${PAT}" -H "Accept: application/vnd.github+json" https://api.github.com/orgs/${ORG}/actions/runners/registration-token | jq .token --raw-output)
+echo "Registration token received: ${REG_TOKEN}"
 
 # Run the script to create the runner
 cd /actions-runner
