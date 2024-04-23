@@ -35,7 +35,6 @@ jobs:
         uses: docker/build-push-action@v5
         with: 
           context: .
-          file: Dockerfile
           pull: true
           push: true
           tags: nyffelsit/github-runner:latest,nyffelsit/github-runner:${{ needs.get_version.outputs.version }}

@@ -1,12 +1,10 @@
 #!/bin/bash
 
-# Start needed services
-service docker start
-
 # Environment variables
 ORG=$ORG
 PAT=$PAT
 NAME=$NAME
+HOSTDOCKER=$HOSTDOCKER
 
 # Script variables
 ACTIONS_RUNNER_INPUT_REPLACE=true
@@ -32,6 +30,13 @@ echo "Removing runner..."
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 trap 'cleanup' SIGTERM
+
+# Start the docker service 
+if [$HOSTDOCKER -eq "1"]
+then
+echo "Starting docker service..."
+service docker start
+fi
 
 # Start the runner
 echo "Starting runner..."
