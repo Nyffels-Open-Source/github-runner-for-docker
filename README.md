@@ -16,7 +16,7 @@ PAT = Personal access token of your user for requested runner tokens.
 HOSTDOCKER = Set to "1" to use the docker of the host by a volume mount (ex. -v /var/run/docker.sock:/var/run/docker.sock)  
 
 # Legal information
-This image is create by "Nyffels BV" under the MIT license. 
+This image is created by "Nyffels BV" under the MIT license. 
 
 # Contribution
 Feel free to branch / fork this repo and make adjustments. To merge in the master branch, please open a issue and a PR in the github repo. 
