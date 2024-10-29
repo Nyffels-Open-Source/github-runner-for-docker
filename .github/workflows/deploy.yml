@@ -37,4 +37,4 @@ jobs:
           context: .
           pull: true
           push: true
-          tags: nyffelsit/github-runner:latest,nyffelsit/github-runner:${{ needs.get_version.outputs.version }}
+          tags: nyffels/github-runner:latest,nyffels/github-runner:${{ needs.get_version.outputs.version }}

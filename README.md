@@ -5,7 +5,7 @@ Run a Github Actions Runner inside of a docker environment on an organisation le
 # Installation 
 
 ```bash
-  docker run --privileged --name github-runner --env=NAME=<NAME> --env=ORG=<ORG> --env=PAT=<PAT> -d nyffelsit/github-runner:latest
+  docker run --privileged --name github-runner --env=NAME=<NAME> --env=ORG=<ORG> --env=PAT=<PAT> -d nyffels/github-runner:latest
 ```
 
 # Environments 
