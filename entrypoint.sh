@@ -9,10 +9,8 @@ PAT="${PAT}"
 NAME="${NAME:-$(hostname)-ephemeral}"
 HOSTDOCKER="${HOSTDOCKER:-0}"
 RUNNER_WORK_DIRECTORY="${RUNNER_WORK_DIRECTORY:-_work}"
-
-# Preserve input replacement and allow root
-export ACTIONS_RUNNER_INPUT_REPLACE=true
-export RUNNER_ALLOW_RUNASROOT=1
+ACTIONS_RUNNER_INPUT_REPLACE=true
+RUNNER_ALLOW_RUNASROOT=1
 
 # =====================
 # Cleanup function

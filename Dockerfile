@@ -30,6 +30,12 @@ RUN chmod +x /opt/runner/bin/docker
 # Add docker label wrapper path to PATH
 ENV PATH="/opt/runner/bin:$PATH"
 
+# Label image for traceability
+LABEL runner-owner="ephemeral-runner"
+
+# Healthcheck to ensure runner container is alive
+HEALTHCHECK CMD pgrep -f config.sh || exit 1
+
 # Copy entrypoint
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

@@ -18,6 +18,13 @@ if [ -d /sys/kernel/security ] && ! mountpoint -q /sys/kernel/security; then
   mount -t securityfs securityfs /sys/kernel/security
 fi
 
+# Start Docker daemon if needed (for DinD)
+if ! pgrep dockerd > /dev/null; then
+  echo "🔧 Starting Docker daemon..."
+  dockerd > /var/log/dockerd.log 2>&1 &
+  sleep 5
+fi
+
 # Add docker label injection wrapper
 mkdir -p /opt/runner/bin
 cat << 'EOF' > /opt/runner/bin/docker
@@ -34,10 +41,21 @@ if [[ "$1" == "run" ]]; then
   done
   echo "🐳 docker run detected – injecting label: ${FORCED_LABEL}"
   exec /usr/bin/docker "$@" "${FORCED_LABEL}"
+elif [[ "$1" == "build" ]]; then
+  for arg in "$@"; do
+    if [[ "$arg" == --label=${RUNNER_LABEL_KEY}=* ]]; then
+      exec /usr/bin/docker "$@"
+    fi
+  done
+  echo "🐳 docker build detected – injecting label: ${FORCED_LABEL}"
+  exec /usr/bin/docker "$@" "${FORCED_LABEL}"
 else
   exec /usr/bin/docker "$@"
 fi
 EOF
+
+chmod +x /opt/runner/bin/docker
+export PATH="/opt/runner/bin:$PATH"
 
 chmod +x /opt/runner/bin/docker
 export PATH="/opt/runner/bin:$PATH"
