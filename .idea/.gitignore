@@ -6,3 +6,6 @@
 # Datasource local storage ignored files
 /dataSources/
 /dataSources.local.xml
+/github-runner-for-docker.iml
+/modules.xml
+/vcs.xml
