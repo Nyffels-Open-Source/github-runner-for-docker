@@ -1,8 +1,8 @@
 FROM ubuntu:22.04
 
 # Set arguments
-ARG RUNNER_VERSION="2.326.0"
-ARG DEBIAN_FRONTEND=nointeractive
+ARG RUNNER_VERSION=2.326.0
+ENV RUNNER_VERSION=${RUNNER_VERSION}
 
 # Install dependencies
 RUN apt-get update
