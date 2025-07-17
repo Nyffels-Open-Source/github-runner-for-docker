@@ -5,36 +5,34 @@ ARG RUNNER_VERSION=2.326.0
 ENV RUNNER_VERSION=${RUNNER_VERSION}
 
 # Install dependencies
-RUN apt-get update
-RUN apt install -y curl 
-RUN apt install -y jq 
-RUN apt install -y build-essential 
-RUN apt install -y libssl-dev 
-RUN apt install -y libffi-dev 
-RUN apt install -y python3 
-RUN apt install -y python3-venv 
-RUN apt install -y python3-dev 
-RUN apt install -y python3-pip
-RUN apt install -y apt-utils
-RUN apt install -y unzip 
+RUN apt-get update && \
+    apt install -y curl jq build-essential libssl-dev libffi-dev \
+    python3 python3-venv python3-dev python3-pip apt-utils unzip && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install github action runner
-RUN mkdir actions-runner && cd actions-runner \
-&& curl -O -L https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
-&& tar xzf ./actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
-RUN /actions-runner/bin/installdependencies.sh
+# Install GitHub Actions runner
+RUN mkdir -p /actions-runner && cd /actions-runner && \
+    curl -O -L https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz && \
+    tar xzf actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz && \
+    rm actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
 
-# Install docker
-RUN curl -sSL https://get.docker.com/ | sh
-ADD ./wrapdocker /usr/local/bin/wrapdocker
-RUN chmod +x /usr/local/bin/wrapdocker
+# Install Docker (DinD)
+RUN curl -sSL https://get.docker.com/ | sh && \
+    sed -i -e 's/ulimit -Hn/ulimit -n/g' /etc/init.d/docker || true
+
+# Docker-in-Docker volume
 VOLUME /var/lib/docker
-CMD ["wrapdocker"]
 
-# Workaround for ulimit error on docker usage
-RUN sed -i -e 's/ulimit -Hn/ulimit -n/g' /etc/init.d/docker
+# Add docker CLI wrapper for automatic label injection
+COPY wrapdocker /opt/runner/bin/docker
+RUN chmod +x /opt/runner/bin/docker
 
-# Copy and set entrypoint
-COPY entrypoint.sh entrypoint.sh
-RUN chmod +x entrypoint.sh
-ENTRYPOINT ["./entrypoint.sh"]
+# Add docker label wrapper path to PATH
+ENV PATH="/opt/runner/bin:$PATH"
+
+# Copy entrypoint
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Set default entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
