@@ -1,7 +1,7 @@
 FROM ubuntu:22.04
 
 # Set arguments
-ARG RUNNER_VERSION="2.315.0"
+ARG RUNNER_VERSION="2.326.0"
 ARG DEBIAN_FRONTEND=nointeractive
 
 # Install dependencies
