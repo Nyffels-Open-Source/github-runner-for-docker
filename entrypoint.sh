@@ -66,6 +66,14 @@ echo "✅ Registration token received"
 # =====================
 # Configure ephemeral runner
 # =====================
+cd /actions-runner
+
+if [ ! -f ./config.sh ]; then
+  echo "❌ config.sh not found in $(pwd). Exiting."
+  ls -al
+  exit 1
+fi
+
 echo "⚙️ Configuring ephemeral runner..."
 ./config.sh \
   --url "https://github.com/${ORG}" \
