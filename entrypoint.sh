@@ -17,7 +17,7 @@ export RUNNER_ALLOW_RUNASROOT=1
 # =====================
 cleanup() {
   echo "🧹 Cleaning up runner registration..."
-  ./config.sh remove --unattended --token "${REG_TOKEN}" || true
+  ./config.sh remove || true
 
   echo "🧼 Cleaning workspace (${RUNNER_WORK_DIRECTORY})..."
   rm -rf "${RUNNER_WORK_DIRECTORY}"/* || true
