@@ -25,37 +25,9 @@ if ! pgrep dockerd > /dev/null; then
   sleep 5
 fi
 
-# Add docker label injection wrapper
-mkdir -p /opt/runner/bin
-cat << 'EOF' > /opt/runner/bin/docker
-#!/bin/bash
-RUNNER_LABEL_KEY="runner-owner"
-RUNNER_LABEL_VALUE="${NAME:-$(hostname)}"
-FORCED_LABEL="--label=${RUNNER_LABEL_KEY}-${RUNNER_LABEL_VALUE}"
+# Remove docker wrapper (label injection logic removed)
+# Restore to default behavior: use system docker binary
+export PATH=$(echo "$PATH" | sed -e 's|/opt/runner/bin:||')
 
-if [[ "$1" == "run" ]]; then
-  for arg in "$@"; do
-    if [[ "$arg" == --label=${RUNNER_LABEL_KEY}-* ]]; then
-      exec /usr/bin/docker "$@"
-    fi
-  done
-  echo "🐳 docker run detected – injecting label: ${FORCED_LABEL}"
-  exec /usr/bin/docker "$@" "${FORCED_LABEL}"
-elif [[ "$1" == "build" ]]; then
-  for arg in "$@"; do
-    if [[ "$arg" == --label=${RUNNER_LABEL_KEY}-* ]]; then
-      exec /usr/bin/docker "$@"
-    fi
-  done
-  echo "🐳 docker build detected – injecting label: ${FORCED_LABEL}"
-  exec /usr/bin/docker "$@" "${FORCED_LABEL}"
-else
-  exec /usr/bin/docker "$@"
-fi
-EOF
-
-chmod +x /opt/runner/bin/docker
-export PATH="/opt/runner/bin:$PATH"
-
-chmod +x /opt/runner/bin/docker
-export PATH="/opt/runner/bin:$PATH"
+# Just to be safe: remove any custom wrapper left
+rm -f /opt/runner/bin/docker
