@@ -24,7 +24,7 @@ jobs:
       - name: Fetch latest GitHub Actions runner version
         id: extract
         run: |
-          version=$(version=$(curl -s https://api.github.com/repos/actions/runner/releases | jq -r '[.[] | select(.prerelease == false and .draft == false)][0].tag_name' | tr -d 'v'))
+          version=$(curl -s https://api.github.com/repos/actions/runner/releases | jq -r '[.[] | select(.prerelease == false and .draft == false)][0].tag_name' | tr -d 'v')
           echo "Latest Runner Version: $version"
           echo "version=$version" >> $GITHUB_OUTPUT
 
