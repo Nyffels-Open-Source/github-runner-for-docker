@@ -31,11 +31,11 @@ cat << 'EOF' > /opt/runner/bin/docker
 #!/bin/bash
 RUNNER_LABEL_KEY="runner-owner"
 RUNNER_LABEL_VALUE="${NAME:-$(hostname)}"
-FORCED_LABEL="--label=${RUNNER_LABEL_KEY}=${RUNNER_LABEL_VALUE}"
+FORCED_LABEL="--label=${RUNNER_LABEL_KEY}-${RUNNER_LABEL_VALUE}"
 
 if [[ "$1" == "run" ]]; then
   for arg in "$@"; do
-    if [[ "$arg" == --label=${RUNNER_LABEL_KEY}=* ]]; then
+    if [[ "$arg" == --label=${RUNNER_LABEL_KEY}-* ]]; then
       exec /usr/bin/docker "$@"
     fi
   done
@@ -43,7 +43,7 @@ if [[ "$1" == "run" ]]; then
   exec /usr/bin/docker "$@" "${FORCED_LABEL}"
 elif [[ "$1" == "build" ]]; then
   for arg in "$@"; do
-    if [[ "$arg" == --label=${RUNNER_LABEL_KEY}=* ]]; then
+    if [[ "$arg" == --label=${RUNNER_LABEL_KEY}-* ]]; then
       exec /usr/bin/docker "$@"
     fi
   done
