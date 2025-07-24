@@ -17,7 +17,13 @@ export RUNNER_ALLOW_RUNASROOT=1
 # =====================
 cleanup() {
   echo "🧹 Cleaning up runner registration..."
-  ./config.sh remove || true
+
+  # Probeer enkel config.sh remove als we effectief een TTY hebben
+  if [[ -t 0 ]]; then
+    ./config.sh remove || true
+  else
+    echo "⚠️ Skipping interactive runner removal (no TTY)"
+  fi
 
   echo "🧼 Cleaning workspace (${RUNNER_WORK_DIRECTORY})..."
   rm -rf "${RUNNER_WORK_DIRECTORY}"/* || true
@@ -64,7 +70,7 @@ fi
 echo "✅ Registration token received"
 
 # =====================
-# Configure ephemeral runner
+# Prepare runner directory
 # =====================
 cd /actions-runner
 
@@ -74,6 +80,29 @@ if [ ! -f ./config.sh ]; then
   exit 1
 fi
 
+# =====================
+# Preflight check: remove stale local config if GitHub doesn't know the runner
+# =====================
+echo "🔎 Checking for stale local configuration..."
+if [[ -f ".runner" ]]; then
+  echo "⚠️ Local .runner config exists. Checking if GitHub knows about this runner..."
+
+  RUNNER_ID=$(curl -s -H "Authorization: Bearer ${PAT}" \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/orgs/${ORG}/actions/runners" \
+    | jq ".runners[] | select(.name==\"${NAME}\") | .id")
+
+  if [[ -z "$RUNNER_ID" ]]; then
+    echo "🧹 Stale local config detected. Removing local runner configuration..."
+    rm -f .runner
+  else
+    echo "✅ GitHub knows this runner (ID: $RUNNER_ID)"
+  fi
+fi
+
+# =====================
+# Configure ephemeral runner
+# =====================
 echo "⚙️ Configuring ephemeral runner..."
 ./config.sh \
   --url "https://github.com/${ORG}" \
