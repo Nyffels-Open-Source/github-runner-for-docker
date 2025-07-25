@@ -122,6 +122,8 @@ if [[ "$HOSTDOCKER" == "1" ]]; then
   service docker start || echo "⚠️ Docker service start failed"
 fi
 
+mkdir -p "${RUNNER_WORK_DIRECTORY}/${GITHUB_REPOSITORY,,}/${GITHUB_REPOSITORY,,}" || true
+
 # =====================
 # Launch runner
 # =====================
