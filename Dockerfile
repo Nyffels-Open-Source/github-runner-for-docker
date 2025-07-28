@@ -16,6 +16,9 @@ RUN mkdir -p /actions-runner && cd /actions-runner && \
     tar xzf actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz && \
     rm actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
 
+# Prevent mount errors by preparing dummy repo path
+RUN mkdir -p /actions-runner/_work/_dummy/_dummy    
+
 # Install Docker (DinD)
 RUN curl -sSL https://get.docker.com/ | sh && \
     sed -i -e 's/ulimit -Hn/ulimit -n/g' /etc/init.d/docker || true
