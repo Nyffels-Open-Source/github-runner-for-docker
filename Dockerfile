@@ -26,13 +26,6 @@ RUN curl -sSL https://get.docker.com/ | sh && \
 # Docker-in-Docker volume
 VOLUME /var/lib/docker
 
-# Add docker CLI wrapper for automatic label injection
-COPY wrapdocker /opt/runner/bin/docker
-RUN chmod +x /opt/runner/bin/docker
-
-# Add docker label wrapper path to PATH
-ENV PATH="/opt/runner/bin:$PATH"
-
 # Label image for traceability
 LABEL runner-owner="ephemeral-runner"
 
