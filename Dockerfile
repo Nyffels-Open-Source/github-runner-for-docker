@@ -23,9 +23,6 @@ RUN mkdir -p /actions-runner/_work/_dummy/_dummy
 RUN curl -sSL https://get.docker.com/ | sh && \
     sed -i -e 's/ulimit -Hn/ulimit -n/g' /etc/init.d/docker || true
 
-# Docker-in-Docker volume
-VOLUME /var/lib/docker
-
 # Label image for traceability
 LABEL runner-owner="ephemeral-runner"
 
