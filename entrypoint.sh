@@ -1,14 +1,54 @@
 #!/bin/bash
 set -Eeuo pipefail
 
+# ── Required/optional env ───────────────────────────────────────────────────────
 ORG="${ORG}"
 PAT="${PAT}"
 NAME="${NAME:-$(hostname)-ephemeral}"
 HOSTDOCKER="${HOSTDOCKER:-0}"
+
 export RUNNER_WORK_DIRECTORY="${RUNNER_WORK_DIRECTORY:-_work}"
 export ACTIONS_RUNNER_INPUT_REPLACE=true
 export RUNNER_ALLOW_RUNASROOT=1
 
+# ── Labels config ───────────────────────────────────────────────────────────────
+DEFAULT_LABELS="ephemeral,docker,self-hosted"
+LABEL_MODE="${LABEL_MODE:-append}"   # append | replace
+CUSTOM_LABELS="${LABELS:-}"
+
+normalize_labels() {
+  local raw="$1"
+  raw="$(printf '%s' "$raw" | tr ';' ',' | tr -d '[:space:]' | tr -s ',')"
+  local IFS=','; read -ra parts <<< "$raw"
+  declare -A seen; local out=()
+  for p in "${parts[@]}"; do
+    [[ -z "$p" ]] && continue
+    if [[ -z "${seen[$p]+x}" ]]; then
+      seen["$p"]=1
+      out+=("$p")
+    fi
+  done
+  (IFS=','; echo "${out[*]}")
+}
+
+case "$LABEL_MODE" in
+  append|replace) ;;
+  *) echo "❌ Invalid LABEL_MODE='$LABEL_MODE' (use 'append' or 'replace')"; exit 1 ;;
+esac
+
+if [[ -n "$CUSTOM_LABELS" ]]; then
+  if [[ "$LABEL_MODE" == "replace" ]]; then
+    EFFECTIVE_LABELS="$(normalize_labels "$CUSTOM_LABELS")"
+  else
+    EFFECTIVE_LABELS="$(normalize_labels "$DEFAULT_LABELS,$CUSTOM_LABELS")"
+  fi
+else
+  EFFECTIVE_LABELS="$DEFAULT_LABELS"
+fi
+
+echo "🏷️ Using runner labels: ${EFFECTIVE_LABELS}"
+
+# ── Internals ──────────────────────────────────────────────────────────────────
 _CLEANED_UP="false"
 _runner_pid=""
 AUTH_HEADER="Authorization: token ${PAT}"
@@ -70,6 +110,7 @@ trap on_term TERM
 trap on_int INT
 trap cleanup EXIT
 
+# ── Guards ─────────────────────────────────────────────────────────────────────
 if [[ -z "${PAT}" ]]; then
   echo "❌ Error: PAT environment variable is not set"
   exit 1
@@ -79,6 +120,7 @@ if [[ -z "${ORG}" ]]; then
   exit 1
 fi
 
+# ── Token fetch ────────────────────────────────────────────────────────────────
 echo "📡 Fetching registration token from org '${ORG}'..."
 API_URL="https://api.github.com/orgs/${ORG}/actions/runners/registration-token"
 echo "Api URL: ${API_URL}"
@@ -89,6 +131,7 @@ if [[ -z "${REG_TOKEN}" ]]; then
 fi
 echo "✅ Registration token received"
 
+# ── Runner install ─────────────────────────────────────────────────────────────
 cd /actions-runner
 if [[ ! -f ./config.sh ]]; then
   echo "❌ config.sh not found in $(pwd). Exiting."
@@ -116,12 +159,13 @@ fi
 mkdir -p "/actions-runner/${RUNNER_WORK_DIRECTORY}"
 export RUNNER_WORK_DIRECTORY="/actions-runner/${RUNNER_WORK_DIRECTORY}"
 
+# ── Stale config check ─────────────────────────────────────────────────────────
 echo "🔎 Checking for stale local configuration..."
 if [[ -f ".runner" ]]; then
   echo "⚠️ Local .runner config exists. Checking if GitHub knows about this runner..."
   RUNNER_ID=$(curl -s -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" \
     "https://api.github.com/orgs/${ORG}/actions/runners" \
-    | jq -r --arg NAME "$NAME" '.runners[] | select(.name==$NAME) | .id // empty')
+    | jq -r --arg NAME "$NAME" '.runners[] | select(.name==$NAME) | .id // empty' || true)
   if [[ -z "${RUNNER_ID}" ]]; then
     echo "🧹 Stale local config detected. Removing local runner configuration..."
     rm -f .runner
@@ -130,6 +174,7 @@ if [[ -f ".runner" ]]; then
   fi
 fi
 
+# ── Configure & run ────────────────────────────────────────────────────────────
 echo "⚙️ Configuring ephemeral runner..."
 ./config.sh \
   --url "https://github.com/${ORG}" \
@@ -139,7 +184,7 @@ echo "⚙️ Configuring ephemeral runner..."
   --unattended \
   --replace \
   --ephemeral \
-  --labels "ephemeral,docker,self-hosted"
+  --labels "${EFFECTIVE_LABELS}"
 
 if [[ "${HOSTDOCKER}" == "1" ]]; then
   echo "🚀 Starting Docker service..."
