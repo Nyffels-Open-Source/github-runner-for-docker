@@ -187,7 +187,13 @@ echo "⚙️ Configuring ephemeral runner..."
   --labels "${EFFECTIVE_LABELS}"
 
 if [[ "${HOSTDOCKER}" == "1" ]]; then
-  echo "🚀 Starting Docker service..."
+  if [[ ! -S /var/run/docker.sock ]]; then
+    echo "❌ HOSTDOCKER=1 but /var/run/docker.sock is not mounted."
+    exit 1
+  fi
+  echo "🐳 Using host Docker (socket mounted)."
+else
+  echo "🐳 Starting Docker service (DinD)..."
   service docker start || echo "⚠️ Docker service start failed"
 fi
 
