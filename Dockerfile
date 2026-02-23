@@ -2,6 +2,7 @@ FROM ubuntu:24.04
 
 # Set arguments
 ARG RUNNER_VERSION=2.331.0
+ARG TARGETARCH
 ENV RUNNER_VERSION=${RUNNER_VERSION}
 
 # Install dependencies
@@ -16,7 +17,13 @@ RUN apt-get update && \
 
 # Install GitHub Actions runner (with checksum verification)
 RUN mkdir -p /actions-runner && cd /actions-runner && \
-    RUNNER_TGZ="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz" && \
+    ARCH_SUFFIX="" && \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) ARCH_SUFFIX="linux-x64" ;; \
+      arm64) ARCH_SUFFIX="linux-arm64" ;; \
+      *) echo "❌ Unsupported TARGETARCH='${TARGETARCH}'" ; exit 1 ;; \
+    esac && \
+    RUNNER_TGZ="actions-runner-${ARCH_SUFFIX}-${RUNNER_VERSION}.tar.gz" && \
     curl -fsSL -o "${RUNNER_TGZ}" "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_TGZ}" && \
     CHECKSUM="$(curl -fsSL "https://api.github.com/repos/actions/runner/releases/tags/v${RUNNER_VERSION}" | \
       jq -r --arg name "${RUNNER_TGZ}" '.assets[] | select(.name==$name) | .digest // empty' | \
