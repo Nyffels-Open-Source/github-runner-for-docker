@@ -1,13 +1,17 @@
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # Set arguments
 ARG RUNNER_VERSION=2.326.0
 ENV RUNNER_VERSION=${RUNNER_VERSION}
 
 # Install dependencies
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
 RUN apt-get update && \
-    apt install -y curl jq build-essential libssl-dev libffi-dev \
+    ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && \
+    apt install -y ca-certificates curl jq build-essential libssl-dev libffi-dev \
     python3 python3-venv python3-dev python3-pip apt-utils unzip && \
+    dpkg-reconfigure -f noninteractive tzdata && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub Actions runner
