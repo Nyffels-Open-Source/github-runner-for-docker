@@ -139,7 +139,7 @@ if [[ ! -f ./config.sh ]]; then
   exit 1
 fi
 
-RUNNER_VERSION="${RUNNER_VERSION:-2.321.0}"
+RUNNER_VERSION="${RUNNER_VERSION:-2.331.0}"
 ARCH="$(uname -m)"
 case "$ARCH" in
   x86_64) RUNNER_ARCH="linux-x64" ;;

@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
 # Set arguments
-ARG RUNNER_VERSION=2.326.0
+ARG RUNNER_VERSION=2.331.0
 ENV RUNNER_VERSION=${RUNNER_VERSION}
 
 # Install dependencies
