@@ -22,6 +22,7 @@ NAME = Name of docker runner in github.
 ORG = ID of the organisation in github.  
 PAT = Personal access token of your user for requested runner tokens.  
 HOSTDOCKER = Set to "1" to use the docker of the host by a volume mount (ex. -v /var/run/docker.sock:/var/run/docker.sock). If set, the container will exit if the socket is missing.  
+CLEANUP NOTE = Host Docker cleanup only removes containers/images labeled `runner-owner=<NAME>`. If you want cleanup to be effective, label your job-created containers/images accordingly.  
 
 # Legal information
 This image is created by "Nyffels BV" under the MIT license. 

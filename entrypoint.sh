@@ -1,7 +1,7 @@
-#!/bin/bash
+﻿#!/bin/bash
 set -Eeuo pipefail
 
-# ── Required/optional env ───────────────────────────────────────────────────────
+# -- Required/optional env ------------------------------------------------
 ORG="${ORG}"
 PAT="${PAT}"
 NAME="${NAME:-$(hostname)-ephemeral}"
@@ -11,7 +11,7 @@ export RUNNER_WORK_DIRECTORY="${RUNNER_WORK_DIRECTORY:-_work}"
 export ACTIONS_RUNNER_INPUT_REPLACE=true
 export RUNNER_ALLOW_RUNASROOT=1
 
-# ── Labels config ───────────────────────────────────────────────────────────────
+# -- Labels config --------------------------------------------------------
 DEFAULT_LABELS="ephemeral,docker,self-hosted"
 LABEL_MODE="${LABEL_MODE:-append}"   # append | replace
 CUSTOM_LABELS="${LABELS:-}"
@@ -33,7 +33,7 @@ normalize_labels() {
 
 case "$LABEL_MODE" in
   append|replace) ;;
-  *) echo "❌ Invalid LABEL_MODE='$LABEL_MODE' (use 'append' or 'replace')"; exit 1 ;;
+  *) echo "ERROR: Invalid LABEL_MODE='$LABEL_MODE' (use 'append' or 'replace')"; exit 1 ;;
 esac
 
 if [[ -n "$CUSTOM_LABELS" ]]; then
@@ -46,9 +46,9 @@ else
   EFFECTIVE_LABELS="$DEFAULT_LABELS"
 fi
 
-echo "🏷️ Using runner labels: ${EFFECTIVE_LABELS}"
+echo "Using runner labels: ${EFFECTIVE_LABELS}"
 
-# ── Internals ──────────────────────────────────────────────────────────────────
+# -- Internals ------------------------------------------------------------
 _CLEANED_UP="false"
 _runner_pid=""
 AUTH_HEADER="Authorization: token ${PAT}"
@@ -59,10 +59,10 @@ cleanup() {
   fi
   _CLEANED_UP="true"
 
-  echo "🧹 Cleaning up runner registration..."
+  echo "Cleaning up runner registration..."
 
   if [[ -n "${_runner_pid}" ]] && kill -0 "${_runner_pid}" 2>/dev/null; then
-    echo "↪️  Stopping runner process PID=${_runner_pid}..."
+    echo "Stopping runner process PID=${_runner_pid}..."
     kill -TERM "${_runner_pid}" 2>/dev/null || true
     for i in {1..10}; do
       if kill -0 "${_runner_pid}" 2>/dev/null; then
@@ -72,7 +72,7 @@ cleanup() {
       fi
     done
     if kill -0 "${_runner_pid}" 2>/dev/null; then
-      echo "⛔ Runner still alive, killing..."
+      echo "Runner still alive, killing..."
       kill -KILL "${_runner_pid}" 2>/dev/null || true
     fi
   fi
@@ -83,58 +83,58 @@ cleanup() {
       | jq -r '.token // empty')"
 
     if [[ -n "${REMOVE_TOKEN}" ]]; then
-      echo "🔐 Remove token acquired, removing runner non-interactively..."
+      echo "Remove token acquired, removing runner non-interactively..."
       ( cd /actions-runner && ./config.sh remove --token "${REMOVE_TOKEN}" --unattended ) || true
     else
-      echo "⚠️  Could not obtain remove token; attempting best-effort unattended removal..."
+      echo "WARN: Could not obtain remove token; attempting best-effort unattended removal..."
       ( cd /actions-runner && ./config.sh remove --unattended ) || true
     fi
   else
-    echo "ℹ️ Skip runner removal: /actions-runner/bin/Runner.Listener not present."
+    echo "INFO: Skip runner removal: /actions-runner/bin/Runner.Listener not present."
   fi
 
-  echo "🧼 Cleaning workspace (${RUNNER_WORK_DIRECTORY})..."
+  echo "Cleaning workspace (${RUNNER_WORK_DIRECTORY})..."
   rm -rf "${RUNNER_WORK_DIRECTORY:?}/"* || true
 
   if [[ "$HOSTDOCKER" == "1" ]]; then
-    echo "🐳 Cleaning up Docker containers and resources for this runner..."
+    echo "Cleaning up Docker containers and resources for this runner (label runner-owner=${NAME})..."
     docker ps -aq --filter "label=runner-owner=${NAME}" | xargs -r docker rm -f || true
     docker images -q --filter "label=runner-owner=${NAME}" | xargs -r docker rmi -f || true
-    echo "✅ Docker cleanup complete (filtered by label 'runner-owner=${NAME}')"
+    echo "Docker cleanup complete (filtered by label 'runner-owner=${NAME}')"
   fi
 }
 
-on_term() { echo "🛑 Caught TERM"; cleanup; exit 0; }
-on_int()  { echo "🛑 Caught INT";  cleanup; exit 130; }
+on_term() { echo "Caught TERM"; cleanup; exit 0; }
+on_int()  { echo "Caught INT";  cleanup; exit 130; }
 trap on_term TERM
 trap on_int INT
 trap cleanup EXIT
 
-# ── Guards ─────────────────────────────────────────────────────────────────────
+# -- Guards ---------------------------------------------------------------
 if [[ -z "${PAT}" ]]; then
-  echo "❌ Error: PAT environment variable is not set"
+  echo "ERROR: PAT environment variable is not set"
   exit 1
 fi
 if [[ -z "${ORG}" ]]; then
-  echo "❌ Error: ORG environment variable is not set"
+  echo "ERROR: ORG environment variable is not set"
   exit 1
 fi
 
-# ── Token fetch ────────────────────────────────────────────────────────────────
-echo "📡 Fetching registration token from org '${ORG}'..."
+# -- Token fetch ----------------------------------------------------------
+echo "Fetching registration token from org '${ORG}'..."
 API_URL="https://api.github.com/orgs/${ORG}/actions/runners/registration-token"
 echo "Api URL: ${API_URL}"
 REG_TOKEN=$(curl -s -X POST -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" "${API_URL}" | jq -r '.token // empty')
 if [[ -z "${REG_TOKEN}" ]]; then
-  echo "❌ Failed to retrieve registration token"
+  echo "ERROR: Failed to retrieve registration token"
   exit 1
 fi
-echo "✅ Registration token received"
+echo "Registration token received"
 
-# ── Runner install ─────────────────────────────────────────────────────────────
+# -- Runner install -------------------------------------------------------
 cd /actions-runner
 if [[ ! -f ./config.sh ]]; then
-  echo "❌ config.sh not found in $(pwd). Exiting."
+  echo "ERROR: config.sh not found in $(pwd). Exiting."
   ls -al || true
   exit 1
 fi
@@ -144,18 +144,18 @@ ARCH="$(uname -m)"
 case "$ARCH" in
   x86_64) RUNNER_ARCH="linux-x64" ;;
   aarch64) RUNNER_ARCH="linux-arm64" ;;
-  *) echo "❌ Unsupported arch: $ARCH"; exit 1 ;;
+  *) echo "ERROR: Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
 if [[ ! -x ./bin/Runner.Listener ]]; then
-  echo "⬇️  Downloading GitHub Actions runner ${RUNNER_VERSION} for ${RUNNER_ARCH}..."
+  echo "Downloading GitHub Actions runner ${RUNNER_VERSION} for ${RUNNER_ARCH}..."
   RUNNER_TGZ="actions-runner-${RUNNER_ARCH}-${RUNNER_VERSION}.tar.gz"
   curl -fsSL -o "${RUNNER_TGZ}" "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_TGZ}"
   CHECKSUM="$(curl -fsSL "https://api.github.com/repos/actions/runner/releases/tags/v${RUNNER_VERSION}" | \
     jq -r --arg name "${RUNNER_TGZ}" '.assets[] | select(.name==$name) | .digest // empty' | \
     sed 's/^sha256://')"
   if [[ -z "${CHECKSUM}" ]]; then
-    echo "❌ Failed to resolve checksum for ${RUNNER_TGZ} via GitHub API digests"
+    echo "ERROR: Failed to resolve checksum for ${RUNNER_TGZ} via GitHub API digests"
     exit 1
   fi
   echo "${CHECKSUM}  ${RUNNER_TGZ}" | sha256sum -c -
@@ -168,23 +168,23 @@ fi
 mkdir -p "/actions-runner/${RUNNER_WORK_DIRECTORY}"
 export RUNNER_WORK_DIRECTORY="/actions-runner/${RUNNER_WORK_DIRECTORY}"
 
-# ── Stale config check ─────────────────────────────────────────────────────────
-echo "🔎 Checking for stale local configuration..."
+# -- Stale config check ---------------------------------------------------
+echo "Checking for stale local configuration..."
 if [[ -f ".runner" ]]; then
-  echo "⚠️ Local .runner config exists. Checking if GitHub knows about this runner..."
+  echo "WARN: Local .runner config exists. Checking if GitHub knows about this runner..."
   RUNNER_ID=$(curl -s -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" \
     "https://api.github.com/orgs/${ORG}/actions/runners" \
     | jq -r --arg NAME "$NAME" '.runners[] | select(.name==$NAME) | .id // empty' || true)
   if [[ -z "${RUNNER_ID}" ]]; then
-    echo "🧹 Stale local config detected. Removing local runner configuration..."
+    echo "Stale local config detected. Removing local runner configuration..."
     rm -f .runner
   else
-    echo "✅ GitHub knows this runner (ID: ${RUNNER_ID})"
+    echo "GitHub knows this runner (ID: ${RUNNER_ID})"
   fi
 fi
 
-# ── Configure & run ────────────────────────────────────────────────────────────
-echo "⚙️ Configuring ephemeral runner..."
+# -- Configure & run ------------------------------------------------------
+echo "Configuring ephemeral runner..."
 ./config.sh \
   --url "https://github.com/${ORG}" \
   --token "${REG_TOKEN}" \
@@ -197,17 +197,18 @@ echo "⚙️ Configuring ephemeral runner..."
 
 if [[ "${HOSTDOCKER}" == "1" ]]; then
   if [[ ! -S /var/run/docker.sock ]]; then
-    echo "❌ HOSTDOCKER=1 but /var/run/docker.sock is not mounted."
+    echo "ERROR: HOSTDOCKER=1 but /var/run/docker.sock is not mounted."
     exit 1
   fi
-  echo "🐳 Using host Docker (socket mounted)."
+  echo "Using host Docker (socket mounted)."
+  echo "NOTE: Host Docker cleanup only removes resources labeled runner-owner=${NAME}."
 else
-  echo "🐳 Starting Docker service (DinD)..."
-  service docker start || echo "⚠️ Docker service start failed"
+  echo "Starting Docker service (DinD)..."
+  service docker start || echo "WARN: Docker service start failed"
 fi
 
-echo "🚀 Starting runner..."
+echo "Starting runner..."
 ./run.sh &
 _runner_pid=$!
 wait "${_runner_pid}" || true
-echo "ℹ️ Runner process exited."
+echo "Runner process exited."
