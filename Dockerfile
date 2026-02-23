@@ -49,7 +49,7 @@ RUN apt-get update && \
 LABEL runner-owner="ephemeral-runner"
 
 # Healthcheck to ensure runner container is alive
-HEALTHCHECK CMD pgrep -f config.sh || exit 1
+HEALTHCHECK CMD pgrep -f Runner.Listener || exit 1
 
 # Copy entrypoint
 COPY entrypoint.sh /entrypoint.sh
