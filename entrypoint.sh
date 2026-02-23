@@ -149,8 +149,17 @@ esac
 
 if [[ ! -x ./bin/Runner.Listener ]]; then
   echo "⬇️  Downloading GitHub Actions runner ${RUNNER_VERSION} for ${RUNNER_ARCH}..."
-  curl -L -o runner.tgz "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-${RUNNER_ARCH}-${RUNNER_VERSION}.tar.gz"
-  tar xzf runner.tgz && rm runner.tgz
+  RUNNER_TGZ="actions-runner-${RUNNER_ARCH}-${RUNNER_VERSION}.tar.gz"
+  curl -fsSL -o "${RUNNER_TGZ}" "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_TGZ}"
+  CHECKSUM="$(curl -fsSL "https://api.github.com/repos/actions/runner/releases/tags/v${RUNNER_VERSION}" | \
+    jq -r --arg name "${RUNNER_TGZ}" '.assets[] | select(.name==$name) | .digest // empty' | \
+    sed 's/^sha256://')"
+  if [[ -z "${CHECKSUM}" ]]; then
+    echo "❌ Failed to resolve checksum for ${RUNNER_TGZ} via GitHub API digests"
+    exit 1
+  fi
+  echo "${CHECKSUM}  ${RUNNER_TGZ}" | sha256sum -c -
+  tar xzf "${RUNNER_TGZ}" && rm "${RUNNER_TGZ}"
   if [[ -x ./bin/installdependencies.sh ]]; then
     ./bin/installdependencies.sh || true
   fi

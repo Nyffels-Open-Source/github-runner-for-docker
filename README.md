@@ -1,6 +1,6 @@
 # Github Action Runner 
 
-Run a Github Actions Runner inside of a docker environment on an organisation level. This docker includes an internal docker instance (DinD) by default. 
+Run a Github Actions Runner inside of a docker environment on an organisation level. This docker includes an internal docker instance (DinD) by default. The runner binary is checksum-verified during image build and at runtime, and Docker is installed from the official apt repository.
 
 # Installation 
 
