@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 set -Eeuo pipefail
 
 # -- Required/optional env ------------------------------------------------
