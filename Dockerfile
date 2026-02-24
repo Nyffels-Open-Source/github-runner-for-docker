@@ -3,9 +3,11 @@ FROM ubuntu:24.04
 # Set arguments
 ARG RUNNER_VERSION=2.331.0
 ARG NODE_VERSION=24.13.0
+ARG NPM_VERSION=11.6.2
 ARG TARGETARCH
 ENV RUNNER_VERSION=${RUNNER_VERSION}
 ENV NODE_VERSION=${NODE_VERSION}
+ENV NPM_VERSION=${NPM_VERSION}
 
 # Install dependencies
 ENV DEBIAN_FRONTEND=noninteractive
@@ -47,7 +49,14 @@ RUN mkdir -p /actions-runner && cd /actions-runner && \
       rm -rf /actions-runner/externals/node24/include \
              /actions-runner/externals/node24/share \
              /actions-runner/externals/node24/lib/node_modules/corepack/shims ; \
-    fi
+    fi && \
+    for NODE_DIR in /actions-runner/externals/node*; do \
+      [ -d "${NODE_DIR}" ] || continue ; \
+      if [ -x "${NODE_DIR}/bin/npm" ]; then \
+        "${NODE_DIR}/bin/npm" --prefix "${NODE_DIR}" install -g "npm@${NPM_VERSION}" --no-audit --no-fund && \
+        "${NODE_DIR}/bin/npm" cache clean --force || true ; \
+      fi ; \
+    done
 
 # Prevent mount errors by preparing dummy repo path
 RUN mkdir -p /actions-runner/_work/_dummy/_dummy    
