@@ -233,6 +233,10 @@ if [[ "${HOSTDOCKER}" == "1" ]]; then
   echo "Using host Docker (socket mounted)."
   echo "NOTE: Host Docker cleanup only removes resources labeled runner-owner=${NAME}."
 else
+  if [[ "$(id -u)" -ne 0 ]]; then
+    echo "ERROR: DinD mode requires root inside the container. Run with --user 0:0 or set HOSTDOCKER=1."
+    exit 1
+  fi
   echo "Starting Docker service (DinD)..."
   if ! service docker start; then
     echo "ERROR: Failed to start Docker service. DinD requires running the container with --privileged."

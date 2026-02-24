@@ -4,6 +4,11 @@ on:
   push: 
     branches: ['main']
 
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
 jobs: 
   get_version:
     runs-on: ubuntu-latest
@@ -63,6 +68,8 @@ jobs:
           context: .
           pull: true
           push: true
+          sbom: true
+          provenance: mode=max
           build-args: |
             RUNNER_VERSION=${{ needs.get_runner_version.outputs.runner_version }}
           tags: |
