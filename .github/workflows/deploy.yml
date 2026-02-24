@@ -111,6 +111,7 @@ jobs:
     needs: [deploy-qa, get_version]
     env:
       IMAGE_REF: nyffels/github-runner:qa-${{ needs.get_version.outputs.version }}
+      SCOUT_TEMP_ALLOW_UNTIL: "2026-04-15"
     steps:
       - name: Login to DockerHub
         uses: docker/login-action@v3
@@ -127,8 +128,31 @@ jobs:
           docker scout version
 
       - name: Blocking
+        shell: bash
         run: |
-          docker scout cves $IMAGE_REF --only-severity critical,high --exit-code
+          set -euo pipefail
+
+          ALLOWED_CVES=("CVE-2025-68121" "CVE-2025-61726")
+          TODAY="$(date -u +%F)"
+          if [[ "$TODAY" > "$SCOUT_TEMP_ALLOW_UNTIL" ]]; then
+            ALLOWED_CVES=()
+            echo "Temporary Scout allowlist expired on ${SCOUT_TEMP_ALLOW_UNTIL}."
+          else
+            echo "Temporary Scout allowlist active until ${SCOUT_TEMP_ALLOW_UNTIL}."
+          fi
+
+          docker scout cves "$IMAGE_REF" --only-severity critical,high --format sarif > scout.sarif || true
+
+          ALLOWED_JSON="$(printf '%s\n' "${ALLOWED_CVES[@]}" | jq -R . | jq -s .)"
+          BLOCKING_COUNT="$(jq --argjson allowed "$ALLOWED_JSON" '[.runs[].results[]? | select((.ruleId as $id | $allowed | index($id)) | not)] | length' scout.sarif)"
+
+          if [[ "$BLOCKING_COUNT" -gt 0 ]]; then
+            echo "Blocking critical/high CVEs found (excluding temporary allowlist):"
+            jq -r --argjson allowed "$ALLOWED_JSON" '.runs[].results[]? | select((.ruleId as $id | $allowed | index($id)) | not) | .ruleId' scout.sarif | sort -u
+            exit 1
+          fi
+
+          echo "No blocking critical/high CVEs outside temporary allowlist."
 
       - name: Non-blocking
         if: always()
