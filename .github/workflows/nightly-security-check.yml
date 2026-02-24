@@ -12,17 +12,16 @@ permissions:
 jobs:
   nightly-security-check:
     runs-on: ubuntu-latest
+    env:
+      IMAGE_REF: nyffels/github-runner:latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build image (latest base layers)
-        run: docker build --pull -t nightly/github-runner:latest-check .
+      - name: Pull latest published image
+        run: docker pull "$IMAGE_REF"
 
       - name: Scan image
         uses: aquasecurity/trivy-action@0.24.0
         with:
-          image-ref: nightly/github-runner:latest-check
+          image-ref: ${{ env.IMAGE_REF }}
           severity: LOW,MEDIUM,HIGH,CRITICAL
           format: json
           output: trivy-nightly.json
@@ -37,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker scout cves nightly/github-runner:latest-check --format sarif > scout-nightly.sarif || true
+          docker scout cves "$IMAGE_REF" --format sarif > scout-nightly.sarif || true
 
       - name: Generate nightly report
         id: report
