@@ -119,23 +119,7 @@ jobs:
         with:
           image-ref: ${{ env.IMAGE_REF }}
           severity: LOW,MEDIUM
-          format: json
-          output: trivy-nonblocking.json
-          exit-code: "0"
-
-      - name: Non-blocking gate (soft-fail)
-        shell: bash
-        run: |
-          set -euo pipefail
-          NON_BLOCKING_COUNT="$(jq '[.Results[]?.Vulnerabilities[]?] | length' trivy-nonblocking.json)"
-          echo "Trivy non-blocking findings count: ${NON_BLOCKING_COUNT}"
-          if [[ "$NON_BLOCKING_COUNT" -gt 0 ]]; then
-            echo "Trivy non-blocking findings detected: ${NON_BLOCKING_COUNT}"
-            jq -r '.Results[]?.Vulnerabilities[]? | "\(.VulnerabilityID // "n/a") | \(.Severity // "n/a") | \(.PkgName // "n/a") | installed=\(.InstalledVersion // "n/a") | fixed=\(.FixedVersion // "n/a")"' trivy-nonblocking.json | sort -u
-            exit 1
-          else
-            echo "No non-blocking Trivy findings."
-          fi
+          exit-code: "1"
 
   scan-scout:
     name: "Security: Docker Scout"
@@ -230,7 +214,7 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: [get_version, scan-trivy, scan-scout, scan-trivy-non-blocking, scan-scout-non-blocking]
+    needs: [get_version, scan-trivy, scan-scout]
     steps:
       - uses: actions/checkout@v4
 
