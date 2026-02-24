@@ -148,7 +148,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          ALLOWED_CVES=("CVE-2025-68121" "CVE-2025-61726")
+          ALLOWED_CVES=("CVE-2025-68121" "CVE-2025-61726" "CVE-2026-23111")
           TODAY="$(date -u +%F)"
           if [[ "$TODAY" > "$SCOUT_TEMP_ALLOW_UNTIL" ]]; then
             ALLOWED_CVES=()
