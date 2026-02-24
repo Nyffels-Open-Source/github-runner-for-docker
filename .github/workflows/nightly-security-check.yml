@@ -15,6 +15,9 @@ jobs:
     env:
       IMAGE_REF: nyffels/github-runner:latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Pull latest published image
         run: docker pull "$IMAGE_REF"
 
@@ -26,6 +29,7 @@ jobs:
           format: json
           output: trivy-nightly.json
           exit-code: "0"
+          trivyignores: .trivyignore
 
       - name: Install Docker Scout
         run: |
