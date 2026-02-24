@@ -3,7 +3,7 @@ FROM ubuntu:24.04
 # Set arguments
 ARG RUNNER_VERSION=2.331.0
 ARG NODE_VERSION=24.13.0
-ARG NPM_VERSION=11.6.2
+ARG NPM_VERSION=11.10.1
 ARG TARGETARCH
 ENV RUNNER_VERSION=${RUNNER_VERSION}
 ENV NODE_VERSION=${NODE_VERSION}
@@ -50,11 +50,15 @@ RUN mkdir -p /actions-runner && cd /actions-runner && \
              /actions-runner/externals/node24/share \
              /actions-runner/externals/node24/lib/node_modules/corepack/shims ; \
     fi && \
+    if [ -d "/actions-runner/externals/node24_alpine" ] && [ -d "/actions-runner/externals/node24" ]; then \
+      rm -rf /actions-runner/externals/node24_alpine/* && \
+      cp -a /actions-runner/externals/node24/. /actions-runner/externals/node24_alpine/ ; \
+    fi && \
     for NODE_DIR in /actions-runner/externals/node*; do \
       [ -d "${NODE_DIR}" ] || continue ; \
-      if [ -x "${NODE_DIR}/bin/npm" ]; then \
-        "${NODE_DIR}/bin/npm" --prefix "${NODE_DIR}" install -g "npm@${NPM_VERSION}" --no-audit --no-fund && \
-        "${NODE_DIR}/bin/npm" cache clean --force || true ; \
+      if [ -x "${NODE_DIR}/bin/node" ] && [ -f "${NODE_DIR}/lib/node_modules/npm/bin/npm-cli.js" ]; then \
+        "${NODE_DIR}/bin/node" "${NODE_DIR}/lib/node_modules/npm/bin/npm-cli.js" --prefix "${NODE_DIR}" install -g "npm@${NPM_VERSION}" --no-audit --no-fund && \
+        "${NODE_DIR}/bin/node" "${NODE_DIR}/lib/node_modules/npm/bin/npm-cli.js" cache clean --force || true ; \
       fi ; \
     done
 
