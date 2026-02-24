@@ -103,7 +103,23 @@ jobs:
         with:
           image-ref: ${{ env.IMAGE_REF }}
           severity: LOW,MEDIUM
+          format: json
+          output: trivy-nonblocking.json
           exit-code: "0"
+
+      - name: Non-blocking summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          NON_BLOCKING_COUNT="$(jq '[.Results[]?.Vulnerabilities[]?] | length' trivy-nonblocking.json)"
+          echo "::notice title=Trivy non-blocking findings::${NON_BLOCKING_COUNT} medium/low vulnerabilities found"
+          {
+            echo "### Trivy non-blocking findings"
+            echo ""
+            echo "- Count: ${NON_BLOCKING_COUNT}"
+            echo "- Severities: LOW, MEDIUM"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   scan-scout:
     name: "Security: Docker Scout"
@@ -156,8 +172,18 @@ jobs:
 
       - name: Non-blocking
         if: always()
+        shell: bash
         run: |
-          docker scout cves $IMAGE_REF --only-severity medium,low
+          set -euo pipefail
+          docker scout cves "$IMAGE_REF" --only-severity medium,low --format sarif > scout-nonblocking.sarif || true
+          NON_BLOCKING_COUNT="$(jq '[.runs[].results[]?] | length' scout-nonblocking.sarif)"
+          echo "::notice title=Docker Scout non-blocking findings::${NON_BLOCKING_COUNT} medium/low CVEs found"
+          {
+            echo "### Docker Scout non-blocking findings"
+            echo ""
+            echo "- Count: ${NON_BLOCKING_COUNT}"
+            echo "- Severities: LOW, MEDIUM"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
     runs-on: ubuntu-latest
