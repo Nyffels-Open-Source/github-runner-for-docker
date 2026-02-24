@@ -79,7 +79,7 @@ EOF
 RUN apt-get update && \
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    sed -i -e 's/ulimit -Hn/ulimit -n/g' /etc/init.d/docker || true
+    (sed -i -e 's/ulimit -Hn/ulimit -n/g' /etc/init.d/docker || true)
 
 # Label image for traceability
 LABEL runner-owner="ephemeral-runner"
