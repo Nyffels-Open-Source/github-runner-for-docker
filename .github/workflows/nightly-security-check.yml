@@ -48,7 +48,8 @@ jobs:
           TOTAL_COUNT="$(jq '[.Results[]?.Vulnerabilities[]?] | length' trivy-nightly.json)"
           HIGH_CRIT_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select((.Severity // "") == "HIGH" or (.Severity // "") == "CRITICAL")] | length' trivy-nightly.json)"
           FIXABLE_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select((.FixedVersion // "") != "" and ((.FixedVersion // "") | ascii_downcase) != "not fixed")] | length' trivy-nightly.json)"
-          SCOUT_TOTAL_COUNT="$(jq '[.runs[].results[]?] | length' scout-nightly.sarif)"
+          SCOUT_TOTAL_COUNT="$(jq '[.runs[]?.results[]?] | length' scout-nightly.sarif)"
+          ACTIONABLE_COUNT="$((FIXABLE_COUNT + HIGH_CRIT_COUNT + SCOUT_TOTAL_COUNT))"
 
           {
             echo "<!-- nightly-security-report -->"
@@ -110,6 +111,7 @@ jobs:
           echo "high_crit_count=${HIGH_CRIT_COUNT}" >> "$GITHUB_OUTPUT"
           echo "fixable_count=${FIXABLE_COUNT}" >> "$GITHUB_OUTPUT"
           echo "scout_total_count=${SCOUT_TOTAL_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "actionable_count=${ACTIONABLE_COUNT}" >> "$GITHUB_OUTPUT"
 
           cat nightly-report.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -123,6 +125,7 @@ jobs:
             nightly-report.md
 
       - name: Create or update GitHub issue
+        if: ${{ steps.report.outputs.actionable_count != '0' }}
         uses: actions/github-script@v7
         env:
           REPORT_PATH: nightly-report.md
@@ -133,6 +136,7 @@ jobs:
             const repo = context.repo.repo;
             const title = 'Nightly Security Report (Automated)';
             const body = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            const assignee = context.actor;
 
             const { data: issues } = await github.rest.issues.listForRepo({
               owner,
@@ -148,15 +152,55 @@ jobs:
                 repo,
                 issue_number: existing.number,
                 title,
-                body
+                body,
+                assignees: [assignee]
               });
-              core.info(`Updated issue #${existing.number}`);
+              core.info(`Updated issue #${existing.number} and assigned to ${assignee}`);
             } else {
               const created = await github.rest.issues.create({
                 owner,
                 repo,
                 title,
-                body
+                body,
+                assignees: [assignee]
               });
-              core.info(`Created issue #${created.data.number}`);
+              core.info(`Created issue #${created.data.number} and assigned to ${assignee}`);
             }
+
+      - name: Close nightly issue when no actionable findings
+        if: ${{ steps.report.outputs.actionable_count == '0' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = 'Nightly Security Report (Automated)';
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100
+            });
+
+            const existing = issues.find(i => i.title === title);
+            if (!existing) {
+              core.info('No open nightly issue to close.');
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: existing.number,
+              body: 'Nightly run found no actionable items (no fixable Trivy findings, no High/Critical Trivy findings, no Docker Scout findings). Closing this issue automatically.'
+            });
+
+            await github.rest.issues.update({
+              owner,
+              repo,
+              issue_number: existing.number,
+              state: 'closed'
+            });
+
+            core.info(`Closed issue #${existing.number}`);
