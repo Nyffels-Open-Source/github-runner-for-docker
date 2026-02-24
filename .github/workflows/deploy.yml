@@ -206,7 +206,17 @@ jobs:
           echo "Docker Scout non-blocking findings count: ${NON_BLOCKING_COUNT}"
           if [[ "$NON_BLOCKING_COUNT" -gt 0 ]]; then
             echo "Docker Scout non-blocking findings detected: ${NON_BLOCKING_COUNT}"
-            jq -r '.runs[].results[]? | "\(.ruleId // "n/a") | \((.message.text // "n/a") | gsub("[\r\n]+"; " "))"' scout-nonblocking.sarif | sort -u
+            echo "| CVE | Summary |"
+            echo "|---|---|"
+            jq -r '
+              .runs[].results[]?
+              | [(.ruleId // "n/a"), ((.message.text // "n/a") | gsub("[\r\n]+"; " ") | gsub("[|]"; "/"))]
+              | @tsv
+            ' scout-nonblocking.sarif \
+              | sort -u \
+              | while IFS=$'\t' read -r cve summary; do
+                  printf '| %s | %s |\n' "$cve" "$summary"
+                done
             exit 1
           else
             echo "No non-blocking Docker Scout findings."
