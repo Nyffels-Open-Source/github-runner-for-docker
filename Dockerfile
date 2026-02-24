@@ -14,7 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 RUN apt-get update && \
     ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && \
-    apt-get install -y --no-install-recommends ca-certificates curl jq apt-utils unzip xz-utils tzdata && \
+    apt-get install -y --no-install-recommends ca-certificates curl jq apt-utils unzip xz-utils tzdata libicu-dev && \
     apt-get upgrade -y && \
     dpkg-reconfigure -f noninteractive tzdata && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
