@@ -1,0 +1,162 @@
+name: Nightly Security Check
+
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  nightly-security-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image (latest base layers)
+        run: docker build --pull -t nightly/github-runner:latest-check .
+
+      - name: Scan image
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: nightly/github-runner:latest-check
+          severity: LOW,MEDIUM,HIGH,CRITICAL
+          format: json
+          output: trivy-nightly.json
+          exit-code: "0"
+
+      - name: Install Docker Scout
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh | sh
+          docker scout version
+
+      - name: Scan image (Docker Scout)
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker scout cves nightly/github-runner:latest-check --format sarif > scout-nightly.sarif || true
+
+      - name: Generate nightly report
+        id: report
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TOTAL_COUNT="$(jq '[.Results[]?.Vulnerabilities[]?] | length' trivy-nightly.json)"
+          HIGH_CRIT_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select((.Severity // "") == "HIGH" or (.Severity // "") == "CRITICAL")] | length' trivy-nightly.json)"
+          FIXABLE_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select((.FixedVersion // "") != "" and ((.FixedVersion // "") | ascii_downcase) != "not fixed")] | length' trivy-nightly.json)"
+          SCOUT_TOTAL_COUNT="$(jq '[.runs[].results[]?] | length' scout-nightly.sarif)"
+
+          {
+            echo "<!-- nightly-security-report -->"
+            echo "# Nightly Security Report"
+            echo ""
+            echo "- Generated (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
+            echo ""
+            echo "## Trivy overview"
+            echo "- Total findings: ${TOTAL_COUNT}"
+            echo "- High/Critical findings: ${HIGH_CRIT_COUNT}"
+            echo "- Findings with a known fix: ${FIXABLE_COUNT}"
+            echo ""
+            echo "## Docker Scout overview"
+            echo "- Total findings: ${SCOUT_TOTAL_COUNT}"
+            echo ""
+            echo "## Possible fixes (from Trivy fixed versions)"
+            echo ""
+            if [[ "$FIXABLE_COUNT" -gt 0 ]]; then
+              echo "| CVE | Severity | Package | Installed | Fixed |"
+              echo "|---|---|---|---|---|"
+              jq -r '
+                .Results[]?.Vulnerabilities[]?
+                | select((.FixedVersion // "") != "" and ((.FixedVersion // "") | ascii_downcase) != "not fixed")
+                | [(.VulnerabilityID // "n/a"), (.Severity // "n/a"), (.PkgName // "n/a"), (.InstalledVersion // "n/a"), (.FixedVersion // "n/a")]
+                | @tsv
+              ' trivy-nightly.json \
+              | sort -u \
+              | while IFS=$'\t' read -r cve severity pkg installed fixed; do
+                  printf '| %s | %s | %s | %s | %s |\n' "$cve" "$severity" "$pkg" "$installed" "$fixed"
+                done
+            else
+              echo "No fixable vulnerabilities reported by Trivy in this run."
+            fi
+            echo ""
+            echo "## Non-fixable right now"
+            echo ""
+            echo "Findings without a fixed package version are usually pending upstream distro/vendor patches."
+            echo ""
+            echo "## Docker Scout findings"
+            echo ""
+            if [[ "$SCOUT_TOTAL_COUNT" -gt 0 ]]; then
+              echo "| CVE | Summary |"
+              echo "|---|---|"
+              jq -r '
+                .runs[].results[]?
+                | [(.ruleId // "n/a"), ((.message.text // "n/a") | gsub("[\r\n]+"; " ") | gsub("[|]"; "/"))]
+                | @tsv
+              ' scout-nightly.sarif \
+              | sort -u \
+              | while IFS=$'\t' read -r cve summary; do
+                  printf '| %s | %s |\n' "$cve" "$summary"
+                done
+            else
+              echo "No Docker Scout findings in this run."
+            fi
+          } > nightly-report.md
+
+          echo "total_count=${TOTAL_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "high_crit_count=${HIGH_CRIT_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "fixable_count=${FIXABLE_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "scout_total_count=${SCOUT_TOTAL_COUNT}" >> "$GITHUB_OUTPUT"
+
+          cat nightly-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-security-report
+          path: |
+            trivy-nightly.json
+            scout-nightly.sarif
+            nightly-report.md
+
+      - name: Create or update GitHub issue
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: nightly-report.md
+        with:
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = 'Nightly Security Report (Automated)';
+            const body = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100
+            });
+
+            const existing = issues.find(i => i.title === title);
+            if (existing) {
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: existing.number,
+                title,
+                body
+              });
+              core.info(`Updated issue #${existing.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body
+              });
+              core.info(`Created issue #${created.data.number}`);
+            }
