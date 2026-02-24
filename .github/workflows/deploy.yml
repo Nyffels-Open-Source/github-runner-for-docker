@@ -100,6 +100,7 @@ jobs:
   scan-trivy-non-blocking:
     name: "Security: Trivy (non-blocking)"
     runs-on: ubuntu-latest
+    continue-on-error: true
     needs: [deploy-qa, get_version]
     env:
       IMAGE_REF: nyffels/github-runner:qa-${{ needs.get_version.outputs.version }}
@@ -122,27 +123,18 @@ jobs:
           output: trivy-nonblocking.json
           exit-code: "0"
 
-      - name: Summary
-        shell: bash
-        run: |
-          set -euo pipefail
-          NON_BLOCKING_COUNT="$(jq '[.Results[]?.Vulnerabilities[]?] | length' trivy-nonblocking.json)"
-          {
-            echo "### Trivy non-blocking findings"
-            echo ""
-            echo "- Count: ${NON_BLOCKING_COUNT}"
-            echo "- Severities: LOW, MEDIUM"
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Non-blocking gate (soft-fail)
-        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           NON_BLOCKING_COUNT="$(jq '[.Results[]?.Vulnerabilities[]?] | length' trivy-nonblocking.json)"
+          echo "Trivy non-blocking findings count: ${NON_BLOCKING_COUNT}"
           if [[ "$NON_BLOCKING_COUNT" -gt 0 ]]; then
             echo "Trivy non-blocking findings detected: ${NON_BLOCKING_COUNT}"
+            jq -r '.Results[]?.Vulnerabilities[]? | "\(.VulnerabilityID // "n/a") | \(.Severity // "n/a") | \(.PkgName // "n/a") | installed=\(.InstalledVersion // "n/a") | fixed=\(.FixedVersion // "n/a")"' trivy-nonblocking.json | sort -u
             exit 1
+          else
+            echo "No non-blocking Trivy findings."
           fi
 
   scan-scout:
@@ -197,6 +189,7 @@ jobs:
   scan-scout-non-blocking:
     name: "Security: Docker Scout (non-blocking)"
     runs-on: ubuntu-latest
+    continue-on-error: true
     needs: [deploy-qa, get_version]
     env:
       IMAGE_REF: nyffels/github-runner:qa-${{ needs.get_version.outputs.version }}
@@ -221,32 +214,23 @@ jobs:
           set -euo pipefail
           docker scout cves "$IMAGE_REF" --only-severity medium,low --format sarif > scout-nonblocking.sarif || true
 
-      - name: Summary
-        shell: bash
-        run: |
-          set -euo pipefail
-          NON_BLOCKING_COUNT="$(jq '[.runs[].results[]?] | length' scout-nonblocking.sarif)"
-          {
-            echo "### Docker Scout non-blocking findings"
-            echo ""
-            echo "- Count: ${NON_BLOCKING_COUNT}"
-            echo "- Severities: LOW, MEDIUM"
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Non-blocking gate (soft-fail)
-        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           NON_BLOCKING_COUNT="$(jq '[.runs[].results[]?] | length' scout-nonblocking.sarif)"
+          echo "Docker Scout non-blocking findings count: ${NON_BLOCKING_COUNT}"
           if [[ "$NON_BLOCKING_COUNT" -gt 0 ]]; then
             echo "Docker Scout non-blocking findings detected: ${NON_BLOCKING_COUNT}"
+            jq -r '.runs[].results[]? | "\(.ruleId // "n/a") | \((.message.text // "n/a") | gsub("[\r\n]+"; " "))"' scout-nonblocking.sarif | sort -u
             exit 1
+          else
+            echo "No non-blocking Docker Scout findings."
           fi
 
   deploy:
     runs-on: ubuntu-latest
-    needs: [get_version, scan-trivy, scan-scout]
+    needs: [get_version, scan-trivy, scan-scout, scan-trivy-non-blocking, scan-scout-non-blocking]
     steps:
       - uses: actions/checkout@v4
 
