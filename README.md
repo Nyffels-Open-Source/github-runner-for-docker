@@ -4,15 +4,47 @@ Run a Github Actions Runner inside of a docker environment on an organisation le
 
 # Installation 
 
+## CLI example (`docker run`)
+
 ```bash
   # Default (DinD): start Docker daemon inside the container
-  docker run --privileged --name github-runner --env=NAME=<NAME> --env=ORG=<ORG> --env=PAT=<PAT> -d nyffels/github-runner:latest
+  docker run --privileged --user 0:0 --name github-runner --env=NAME=<NAME> --env=ORG=<ORG> --env=PAT=<PAT> -d nyffels/github-runner:latest
 
   # Host Docker: use the host daemon via socket mount
-  docker run --privileged --name github-runner --env=NAME=<NAME> --env=ORG=<ORG> --env=PAT=<PAT> --env=HOSTDOCKER=1 -v /var/run/docker.sock:/var/run/docker.sock -d nyffels/github-runner:latest
+  docker run --name github-runner --env=NAME=<NAME> --env=ORG=<ORG> --env=PAT=<PAT> --env=HOSTDOCKER=1 -v /var/run/docker.sock:/var/run/docker.sock -d nyffels/github-runner:latest
 ```
 
-`--privileged` is required for DinD so the container can start the Docker daemon and access the necessary kernel features. It is also commonly used with the host socket mount to avoid permission issues, but you can omit it if your environment allows Docker socket access without it.
+## Docker Compose example
+
+```yaml
+services:
+  # DinD mode
+  runner-dind:
+    image: nyffels/github-runner:latest
+    container_name: github-runner-dind
+    privileged: true
+    user: "0:0"
+    restart: unless-stopped
+    environment:
+      NAME: "runner-dind"
+      ORG: "${ORG}"
+      PAT: "${PAT}"
+
+  # Host Docker mode
+  runner-host:
+    image: nyffels/github-runner:latest
+    container_name: github-runner-host
+    restart: unless-stopped
+    environment:
+      NAME: "runner-host"
+      ORG: "${ORG}"
+      PAT: "${PAT}"
+      HOSTDOCKER: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+`--privileged` and `--user 0:0` are required for DinD so the container can start the Docker daemon and access the necessary kernel features. For host-socket mode (`HOSTDOCKER=1`), they are not required unless your Docker socket permissions require elevated access.
 
 Security note: `--privileged` grants broad kernel access inside the container, and mounting `/var/run/docker.sock` effectively grants root access on the host. Prefer DinD for better isolation (with higher resource usage), and if you use the host socket, run on dedicated hosts with restricted access.
 
