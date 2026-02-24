@@ -64,6 +64,19 @@ api_get() {
   curl "${CURL_COMMON_OPTS[@]}" -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" "${url}"
 }
 
+wait_for_docker() {
+  local timeout_seconds="${1:-30}"
+  local waited=0
+  while (( waited < timeout_seconds )); do
+    if docker info >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
 cleanup() {
   if [[ "${_CLEANED_UP}" == "true" ]]; then
     return 0
@@ -213,11 +226,22 @@ if [[ "${HOSTDOCKER}" == "1" ]]; then
     echo "ERROR: HOSTDOCKER=1 but /var/run/docker.sock is not mounted."
     exit 1
   fi
+  if ! wait_for_docker 10; then
+    echo "ERROR: HOSTDOCKER=1 but Docker daemon is not reachable through /var/run/docker.sock."
+    exit 1
+  fi
   echo "Using host Docker (socket mounted)."
   echo "NOTE: Host Docker cleanup only removes resources labeled runner-owner=${NAME}."
 else
   echo "Starting Docker service (DinD)..."
-  service docker start || echo "WARN: Docker service start failed"
+  if ! service docker start; then
+    echo "ERROR: Failed to start Docker service. DinD requires running the container with --privileged."
+    exit 1
+  fi
+  if ! wait_for_docker 30; then
+    echo "ERROR: Docker service did not become ready within 30 seconds."
+    exit 1
+  fi
 fi
 
 echo "Starting runner..."
