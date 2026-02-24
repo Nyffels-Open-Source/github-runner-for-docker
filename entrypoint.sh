@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 
 # -- Required/optional env ------------------------------------------------
-ORG="${ORG}"
-PAT="${PAT}"
+ORG="${ORG:-}"
+PAT="${PAT:-}"
 NAME="${NAME:-$(hostname)-ephemeral}"
 HOSTDOCKER="${HOSTDOCKER:-0}"
 
@@ -52,6 +52,17 @@ echo "Using runner labels: ${EFFECTIVE_LABELS}"
 _CLEANED_UP="false"
 _runner_pid=""
 AUTH_HEADER="Authorization: token ${PAT}"
+CURL_COMMON_OPTS=(--retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 30 -fsSL)
+
+api_post() {
+  local url="$1"
+  curl "${CURL_COMMON_OPTS[@]}" -X POST -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" "${url}"
+}
+
+api_get() {
+  local url="$1"
+  curl "${CURL_COMMON_OPTS[@]}" -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" "${url}"
+}
 
 cleanup() {
   if [[ "${_CLEANED_UP}" == "true" ]]; then
@@ -78,9 +89,8 @@ cleanup() {
   fi
 
   if [[ -f /actions-runner/config.sh && -x /actions-runner/bin/Runner.Listener ]]; then
-    REMOVE_TOKEN="$(curl -s -X POST -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" \
-      "https://api.github.com/orgs/${ORG}/actions/runners/remove-token" \
-      | jq -r '.token // empty')"
+    REMOVE_TOKEN="$(api_post "https://api.github.com/orgs/${ORG}/actions/runners/remove-token" \
+      | jq -r '.token // empty' 2>/dev/null || true)"
 
     if [[ -n "${REMOVE_TOKEN}" ]]; then
       echo "Remove token acquired, removing runner non-interactively..."
@@ -94,7 +104,11 @@ cleanup() {
   fi
 
   echo "Cleaning workspace (${RUNNER_WORK_DIRECTORY})..."
-  rm -rf "${RUNNER_WORK_DIRECTORY:?}/"* || true
+  if [[ -d "${RUNNER_WORK_DIRECTORY}" ]]; then
+    find "${RUNNER_WORK_DIRECTORY:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + || true
+  else
+    echo "INFO: Skip workspace cleanup: ${RUNNER_WORK_DIRECTORY} does not exist."
+  fi
 
   if [[ "$HOSTDOCKER" == "1" ]]; then
     echo "Cleaning up Docker containers and resources for this runner (label runner-owner=${NAME})..."
@@ -124,7 +138,7 @@ fi
 echo "Fetching registration token from org '${ORG}'..."
 API_URL="https://api.github.com/orgs/${ORG}/actions/runners/registration-token"
 echo "Api URL: ${API_URL}"
-REG_TOKEN=$(curl -s -X POST -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" "${API_URL}" | jq -r '.token // empty')
+REG_TOKEN="$(api_post "${API_URL}" | jq -r '.token // empty' 2>/dev/null || true)"
 if [[ -z "${REG_TOKEN}" ]]; then
   echo "ERROR: Failed to retrieve registration token"
   exit 1
@@ -172,9 +186,8 @@ export RUNNER_WORK_DIRECTORY="/actions-runner/${RUNNER_WORK_DIRECTORY}"
 echo "Checking for stale local configuration..."
 if [[ -f ".runner" ]]; then
   echo "WARN: Local .runner config exists. Checking if GitHub knows about this runner..."
-  RUNNER_ID=$(curl -s -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/orgs/${ORG}/actions/runners" \
-    | jq -r --arg NAME "$NAME" '.runners[] | select(.name==$NAME) | .id // empty' || true)
+  RUNNER_ID="$(api_get "https://api.github.com/orgs/${ORG}/actions/runners" \
+    | jq -r --arg NAME "$NAME" '.runners[] | select(.name==$NAME) | .id // empty' 2>/dev/null || true)"
   if [[ -z "${RUNNER_ID}" ]]; then
     echo "Stale local config detected. Removing local runner configuration..."
     rm -f .runner
