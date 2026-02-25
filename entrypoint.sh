@@ -51,6 +51,7 @@ echo "Using runner labels: ${EFFECTIVE_LABELS}"
 # -- Internals ------------------------------------------------------------
 _CLEANED_UP="false"
 _runner_pid=""
+_dockerd_pid=""
 AUTH_HEADER="Authorization: token ${PAT}"
 CURL_COMMON_OPTS=(--retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 30 -fsSL)
 
@@ -77,6 +78,57 @@ wait_for_docker() {
   return 1
 }
 
+start_dind() {
+  local driver="${DOCKER_DRIVER:-overlay2}"
+  local data_root="${DOCKER_DATA_ROOT:-/var/lib/docker}"
+  local -a extra_args=()
+  if [[ -n "${DOCKERD_ARGS:-}" ]]; then
+    # Intentionally split DOCKERD_ARGS on shell word boundaries for CLI-style flags.
+    # shellcheck disable=SC2206
+    extra_args=( ${DOCKERD_ARGS} )
+  fi
+
+  mkdir -p /var/run /var/log "${data_root}"
+  rm -f /var/run/docker.pid
+
+  echo "Starting dockerd (driver=${driver}, data-root=${data_root})..."
+  dockerd \
+    --host=unix:///var/run/docker.sock \
+    --data-root="${data_root}" \
+    --storage-driver="${driver}" \
+    "${extra_args[@]}" >/var/log/dockerd.log 2>&1 &
+  _dockerd_pid=$!
+
+  if wait_for_docker 45; then
+    echo "Docker daemon is ready."
+    return 0
+  fi
+
+  if [[ "${driver}" != "vfs" ]]; then
+    echo "WARN: dockerd did not become ready with driver '${driver}'. Retrying with 'vfs'..."
+    if [[ -n "${_dockerd_pid}" ]] && kill -0 "${_dockerd_pid}" 2>/dev/null; then
+      kill -TERM "${_dockerd_pid}" 2>/dev/null || true
+      wait "${_dockerd_pid}" 2>/dev/null || true
+    fi
+    rm -f /var/run/docker.pid
+    dockerd \
+      --host=unix:///var/run/docker.sock \
+      --data-root="${data_root}" \
+      --storage-driver=vfs \
+      "${extra_args[@]}" >/var/log/dockerd.log 2>&1 &
+    _dockerd_pid=$!
+    if wait_for_docker 45; then
+      echo "Docker daemon is ready (fallback storage driver: vfs)."
+      return 0
+    fi
+  fi
+
+  echo "ERROR: Docker daemon did not become ready."
+  echo "Last dockerd logs:"
+  tail -n 200 /var/log/dockerd.log || true
+  return 1
+}
+
 cleanup() {
   if [[ "${_CLEANED_UP}" == "true" ]]; then
     return 0
@@ -99,6 +151,12 @@ cleanup() {
       echo "Runner still alive, killing..."
       kill -KILL "${_runner_pid}" 2>/dev/null || true
     fi
+  fi
+
+  if [[ -n "${_dockerd_pid}" ]] && kill -0 "${_dockerd_pid}" 2>/dev/null; then
+    echo "Stopping Docker daemon PID=${_dockerd_pid}..."
+    kill -TERM "${_dockerd_pid}" 2>/dev/null || true
+    wait "${_dockerd_pid}" 2>/dev/null || true
   fi
 
   if [[ -f /actions-runner/config.sh && -x /actions-runner/bin/Runner.Listener ]]; then
@@ -237,13 +295,8 @@ else
     echo "ERROR: DinD mode requires root inside the container. Run with --user 0:0 or set HOSTDOCKER=1."
     exit 1
   fi
-  echo "Starting Docker service (DinD)..."
-  if ! service docker start; then
-    echo "ERROR: Failed to start Docker service. DinD requires running the container with --privileged."
-    exit 1
-  fi
-  if ! wait_for_docker 30; then
-    echo "ERROR: Docker service did not become ready within 30 seconds."
+  if ! start_dind; then
+    echo "ERROR: DinD startup failed. Ensure the container is running with --privileged."
     exit 1
   fi
 fi
