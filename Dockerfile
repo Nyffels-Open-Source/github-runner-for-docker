@@ -93,8 +93,9 @@ RUN chmod +x /entrypoint.sh && \
     useradd --create-home --shell /bin/bash --uid 1001 runner && \
     chown -R runner:runner /actions-runner
 
-# Default to non-root user for least privilege
-USER 1001
+# Default to root so DinD works out-of-the-box.
+# For least privilege in host-socket mode, users can still override with `--user 1001:1001`.
+USER 0
 
 # Set default entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
