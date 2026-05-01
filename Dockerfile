@@ -22,7 +22,7 @@ ENV TZ=Etc/UTC
 RUN apt-get update && \
     ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && \
     apt-get full-upgrade -y && \
-    apt-get install -y --no-install-recommends ca-certificates curl jq unzip xz-utils tzdata libicu76 && \
+    apt-get install -y --no-install-recommends ca-certificates curl git jq unzip xz-utils tzdata libicu76 && \
     dpkg-reconfigure -f noninteractive tzdata && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
