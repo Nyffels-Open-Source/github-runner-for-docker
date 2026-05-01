@@ -8,7 +8,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG RUNNER_VERSION=2.334.0
 ARG NODE_VERSION=24.15.0
 ARG NPM_VERSION=11.13.0
-ARG INSTALL_DOCKER_PLUGINS=false
+ARG INSTALL_DOCKER_PLUGINS=true
 ARG TARGETOS
 ARG TARGETARCH
 ENV RUNNER_VERSION=${RUNNER_VERSION}
@@ -95,7 +95,10 @@ RUN apt-get update && \
       apt-get install -y --no-install-recommends docker-buildx-plugin docker-compose-plugin ; \
     fi && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    (sed -i -e 's/ulimit -Hn/ulimit -n/g' /etc/init.d/docker || true)
+    (sed -i -e 's/ulimit -Hn/ulimit -n/g' /etc/init.d/docker || true) && \
+    if [ "${INSTALL_DOCKER_PLUGINS}" = "true" ]; then \
+      docker buildx version && docker compose version ; \
+    fi
 
 # Label image for traceability
 LABEL runner-owner="ephemeral-runner"

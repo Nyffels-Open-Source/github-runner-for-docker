@@ -104,13 +104,15 @@ docker buildx build \
   --push .
 ```
 
-The default image installs Docker Engine, Docker CLI, and containerd. Docker Buildx and Compose plugins can be included when you need those commands inside runner jobs:
+The default image installs Docker Engine, Docker CLI, containerd, and the Docker Buildx and Compose plugins so runner jobs can use commands such as `docker buildx` and `docker compose`.
+
+You can exclude the plugins when building a specialized image:
 
 ```bash
-docker build --build-arg INSTALL_DOCKER_PLUGINS=true -t github-runner .
+docker build --build-arg INSTALL_DOCKER_PLUGINS=false -t github-runner .
 ```
 
-The plugins are opt-in because upstream plugin packages can carry Go module findings before Docker publishes rebuilt plugin binaries.
+The plugins can carry Go module findings before Docker publishes rebuilt plugin binaries. Use the opt-out build argument only if you do not run jobs that need Buildx or Compose inside the runner.
 
 ## Cleanup
 
