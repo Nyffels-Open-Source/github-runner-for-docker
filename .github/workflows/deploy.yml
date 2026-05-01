@@ -128,37 +128,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ env.IMAGE_REF }}
-          severity: CRITICAL,HIGH
-          exit-code: "1"
-          trivyignores: .trivyignore
-
-  scan-trivy-non-blocking:
-    name: "Security: Trivy non-blocking (${{ matrix.platform }})"
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    needs: [deploy, get_version]
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [linux/amd64, linux/arm64]
-    env:
-      IMAGE_REF: nyffels/github-runner:${{ needs.get_version.outputs.version }}
-      TRIVY_PLATFORM: ${{ matrix.platform }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Scan image
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          image-ref: ${{ env.IMAGE_REF }}
-          severity: LOW,MEDIUM
+          severity: LOW,MEDIUM,HIGH,CRITICAL
           exit-code: "1"
           trivyignores: .trivyignore
 
@@ -191,56 +161,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          docker scout cves "$IMAGE_REF" \
-            --platform "$PLATFORM" \
-            --only-severity critical,high \
-            --format sarif > scout.sarif || true
+          docker scout cves "$IMAGE_REF" --platform "$PLATFORM" --format sarif > scout.sarif || true
 
-          blocking_count="$(jq '[.runs[].results[]?] | length' scout.sarif)"
-          if [[ "$blocking_count" -gt 0 ]]; then
-            echo "Blocking critical/high CVEs found for ${PLATFORM}:"
-            jq -r '.runs[].results[]? | .ruleId' scout.sarif | sort -u
-            exit 1
-          fi
-
-          echo "No blocking critical/high CVEs for ${PLATFORM}."
-
-  scan-scout-non-blocking:
-    name: "Security: Docker Scout non-blocking (${{ matrix.platform }})"
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    needs: [deploy, get_version]
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [linux/amd64, linux/arm64]
-    env:
-      IMAGE_REF: nyffels/github-runner:${{ needs.get_version.outputs.version }}
-      PLATFORM: ${{ matrix.platform }}
-    steps:
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Install Docker Scout
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh | sh
-          docker scout version
-
-      - name: Scan image
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          docker scout cves "$IMAGE_REF" \
-            --platform "$PLATFORM" \
-            --only-severity medium,low \
-            --format sarif > scout-nonblocking.sarif || true
-
-          finding_count="$(jq '[.runs[].results[]?] | length' scout-nonblocking.sarif)"
-          echo "Docker Scout non-blocking findings for ${PLATFORM}: ${finding_count}"
+          finding_count="$(jq '[.runs[].results[]?] | length' scout.sarif)"
+          echo "Docker Scout findings for ${PLATFORM}: ${finding_count}"
 
           if [[ "$finding_count" -gt 0 ]]; then
             echo "| CVE | Summary |"
@@ -249,7 +173,7 @@ jobs:
               .runs[].results[]?
               | [(.ruleId // "n/a"), ((.message.text // "n/a") | gsub("[\r\n]+"; " ") | gsub("[|]"; "/"))]
               | @tsv
-            ' scout-nonblocking.sarif \
+            ' scout.sarif \
               | sort -u \
               | while IFS=$'\t' read -r cve summary; do
                   printf '| %s | %s |\n' "$cve" "$summary"
