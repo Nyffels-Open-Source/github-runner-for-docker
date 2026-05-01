@@ -48,6 +48,16 @@ services:
 
 Security note: `--privileged` grants broad kernel access inside the container, and mounting `/var/run/docker.sock` effectively grants root access on the host. Prefer DinD for better isolation (with higher resource usage), and if you use the host socket, run on dedicated hosts with restricted access.
 
+## Build options
+
+The default image installs Docker Engine, Docker CLI, and containerd. Docker Buildx and Compose plugins can be included with:
+
+```bash
+docker build --build-arg INSTALL_DOCKER_PLUGINS=true -t github-runner .
+```
+
+They are opt-in because the current upstream plugin packages may carry Go module findings before Docker publishes rebuilt plugin binaries.
+
 # Environments 
 
 NAME = Name of docker runner in github.  

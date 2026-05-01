@@ -1,9 +1,10 @@
 FROM ubuntu:25.10
 
 # Set arguments
-ARG RUNNER_VERSION=2.331.0
-ARG NODE_VERSION=24.13.0
-ARG NPM_VERSION=11.10.1
+ARG RUNNER_VERSION=2.334.0
+ARG NODE_VERSION=24.15.0
+ARG NPM_VERSION=11.13.0
+ARG INSTALL_DOCKER_PLUGINS=false
 ARG TARGETARCH
 ENV RUNNER_VERSION=${RUNNER_VERSION}
 ENV NODE_VERSION=${NODE_VERSION}
@@ -14,8 +15,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 RUN apt-get update && \
     ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && \
-    apt-get install -y --no-install-recommends ca-certificates curl jq apt-utils unzip xz-utils tzdata libicu-dev && \
-    apt-get upgrade -y && \
+    apt-get full-upgrade -y && \
+    apt-get install -y --no-install-recommends ca-certificates curl jq unzip xz-utils tzdata libicu76 && \
     dpkg-reconfigure -f noninteractive tzdata && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -26,14 +27,14 @@ RUN mkdir -p /actions-runner && cd /actions-runner && \
     case "${TARGETARCH:-amd64}" in \
       amd64) ARCH_SUFFIX="linux-x64"; NODE_ARCH="x64" ;; \
       arm64) ARCH_SUFFIX="linux-arm64"; NODE_ARCH="arm64" ;; \
-      *) echo "❌ Unsupported TARGETARCH='${TARGETARCH}'" ; exit 1 ;; \
+      *) echo "Unsupported TARGETARCH='${TARGETARCH}'" ; exit 1 ;; \
     esac && \
     RUNNER_TGZ="actions-runner-${ARCH_SUFFIX}-${RUNNER_VERSION}.tar.gz" && \
     curl -fsSL -o "${RUNNER_TGZ}" "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_TGZ}" && \
     CHECKSUM="$(curl -fsSL "https://api.github.com/repos/actions/runner/releases/tags/v${RUNNER_VERSION}" | \
       jq -r --arg name "${RUNNER_TGZ}" '.assets[] | select(.name==$name) | .digest // empty' | \
       sed 's/^sha256://')" && \
-    if [ -z "${CHECKSUM}" ]; then echo "❌ Failed to resolve checksum for ${RUNNER_TGZ} via GitHub API digests"; exit 1; fi && \
+    if [ -z "${CHECKSUM}" ]; then echo "Failed to resolve checksum for ${RUNNER_TGZ} via GitHub API digests"; exit 1; fi && \
     echo "${CHECKSUM}  ${RUNNER_TGZ}" | sha256sum -c - && \
     tar xzf "${RUNNER_TGZ}" && \
     rm "${RUNNER_TGZ}" && \
@@ -41,7 +42,7 @@ RUN mkdir -p /actions-runner && cd /actions-runner && \
       NODE_TGZ="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" && \
       curl -fsSL -o "${NODE_TGZ}" "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_TGZ}" && \
       NODE_CHECKSUM="$(curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" | awk "/ ${NODE_TGZ}\$/ {print \$1}")" && \
-      if [ -z "${NODE_CHECKSUM}" ]; then echo "❌ Failed to resolve checksum for ${NODE_TGZ}"; exit 1; fi && \
+      if [ -z "${NODE_CHECKSUM}" ]; then echo "Failed to resolve checksum for ${NODE_TGZ}"; exit 1; fi && \
       echo "${NODE_CHECKSUM}  ${NODE_TGZ}" | sha256sum -c - && \
       rm -rf /actions-runner/externals/node24/* && \
       tar -xJf "${NODE_TGZ}" --strip-components=1 -C /actions-runner/externals/node24 && \
@@ -74,10 +75,15 @@ Types: deb
 URIs: https://download.docker.com/linux/ubuntu
 Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
 Components: stable
+Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
 RUN apt-get update && \
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && \
+    apt-get full-upgrade -y && \
+    apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io && \
+    if [ "${INSTALL_DOCKER_PLUGINS}" = "true" ]; then \
+      apt-get install -y --no-install-recommends docker-buildx-plugin docker-compose-plugin ; \
+    fi && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
     (sed -i -e 's/ulimit -Hn/ulimit -n/g' /etc/init.d/docker || true)
 
