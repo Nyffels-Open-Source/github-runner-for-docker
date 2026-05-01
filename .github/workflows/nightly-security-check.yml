@@ -9,6 +9,10 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: nightly-security-check
+  cancel-in-progress: true
+
 jobs:
   nightly-security-check:
     runs-on: ubuntu-latest
@@ -18,16 +22,40 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Pull latest published image
-        run: docker pull "$IMAGE_REF"
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Scan image
-        uses: aquasecurity/trivy-action@0.24.0
+      - name: Pull latest published images
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull --platform linux/amd64 "$IMAGE_REF"
+          docker pull --platform linux/arm64 "$IMAGE_REF"
+
+      - name: Scan image with Trivy (linux/amd64)
+        uses: aquasecurity/trivy-action@0.35.0
+        env:
+          TRIVY_PLATFORM: linux/amd64
         with:
           image-ref: ${{ env.IMAGE_REF }}
           severity: LOW,MEDIUM,HIGH,CRITICAL
           format: json
-          output: trivy-nightly.json
+          output: trivy-nightly-linux-amd64.json
+          exit-code: "0"
+          trivyignores: .trivyignore
+
+      - name: Scan image with Trivy (linux/arm64)
+        uses: aquasecurity/trivy-action@0.35.0
+        env:
+          TRIVY_PLATFORM: linux/arm64
+        with:
+          image-ref: ${{ env.IMAGE_REF }}
+          severity: LOW,MEDIUM,HIGH,CRITICAL
+          format: json
+          output: trivy-nightly-linux-arm64.json
           exit-code: "0"
           trivyignores: .trivyignore
 
@@ -36,11 +64,12 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh | sh
           docker scout version
 
-      - name: Scan image (Docker Scout)
+      - name: Scan image with Docker Scout
         shell: bash
         run: |
           set -euo pipefail
-          docker scout cves "$IMAGE_REF" --format sarif > scout-nightly.sarif || true
+          docker scout cves "$IMAGE_REF" --platform linux/amd64 --format sarif > scout-nightly-linux-amd64.sarif || true
+          docker scout cves "$IMAGE_REF" --platform linux/arm64 --format sarif > scout-nightly-linux-arm64.sarif || true
 
       - name: Generate nightly report
         id: report
@@ -48,10 +77,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          TOTAL_COUNT="$(jq '[.Results[]?.Vulnerabilities[]?] | length' trivy-nightly.json)"
-          HIGH_CRIT_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select((.Severity // "") == "HIGH" or (.Severity // "") == "CRITICAL")] | length' trivy-nightly.json)"
-          FIXABLE_COUNT="$(jq '[.Results[]?.Vulnerabilities[]? | select((.FixedVersion // "") != "" and ((.FixedVersion // "") | ascii_downcase) != "not fixed")] | length' trivy-nightly.json)"
-          SCOUT_TOTAL_COUNT="$(jq '[.runs[]?.results[]?] | length' scout-nightly.sarif)"
+          trivy_files=(trivy-nightly-linux-amd64.json trivy-nightly-linux-arm64.json)
+          scout_files=(scout-nightly-linux-amd64.sarif scout-nightly-linux-arm64.sarif)
+
+          TOTAL_COUNT="$(jq -s '[.[].Results[]?.Vulnerabilities[]?] | length' "${trivy_files[@]}")"
+          HIGH_CRIT_COUNT="$(jq -s '[.[].Results[]?.Vulnerabilities[]? | select((.Severity // "") == "HIGH" or (.Severity // "") == "CRITICAL")] | length' "${trivy_files[@]}")"
+          FIXABLE_COUNT="$(jq -s '[.[].Results[]?.Vulnerabilities[]? | select((.FixedVersion // "") != "" and ((.FixedVersion // "") | ascii_downcase) != "not fixed")] | length' "${trivy_files[@]}")"
+          SCOUT_TOTAL_COUNT="$(jq -s '[.[].runs[]?.results[]?] | length' "${scout_files[@]}")"
           ACTIONABLE_COUNT="$((FIXABLE_COUNT + HIGH_CRIT_COUNT + SCOUT_TOTAL_COUNT))"
 
           {
@@ -59,6 +91,7 @@ jobs:
             echo "# Nightly Security Report"
             echo ""
             echo "- Generated (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
+            echo "- Platforms scanned: linux/amd64, linux/arm64"
             echo ""
             echo "## Trivy overview"
             echo "- Total findings: ${TOTAL_COUNT}"
@@ -78,7 +111,7 @@ jobs:
                 | select((.FixedVersion // "") != "" and ((.FixedVersion // "") | ascii_downcase) != "not fixed")
                 | [(.VulnerabilityID // "n/a"), (.Severity // "n/a"), (.PkgName // "n/a"), (.InstalledVersion // "n/a"), (.FixedVersion // "n/a")]
                 | @tsv
-              ' trivy-nightly.json \
+              ' "${trivy_files[@]}" \
               | sort -u \
               | while IFS=$'\t' read -r cve severity pkg installed fixed; do
                   printf '| %s | %s | %s | %s | %s |\n' "$cve" "$severity" "$pkg" "$installed" "$fixed"
@@ -100,7 +133,7 @@ jobs:
                 .runs[].results[]?
                 | [(.ruleId // "n/a"), ((.message.text // "n/a") | gsub("[\r\n]+"; " ") | gsub("[|]"; "/"))]
                 | @tsv
-              ' scout-nightly.sarif \
+              ' "${scout_files[@]}" \
               | sort -u \
               | while IFS=$'\t' read -r cve summary; do
                   printf '| %s | %s |\n' "$cve" "$summary"
@@ -110,11 +143,13 @@ jobs:
             fi
           } > nightly-report.md
 
-          echo "total_count=${TOTAL_COUNT}" >> "$GITHUB_OUTPUT"
-          echo "high_crit_count=${HIGH_CRIT_COUNT}" >> "$GITHUB_OUTPUT"
-          echo "fixable_count=${FIXABLE_COUNT}" >> "$GITHUB_OUTPUT"
-          echo "scout_total_count=${SCOUT_TOTAL_COUNT}" >> "$GITHUB_OUTPUT"
-          echo "actionable_count=${ACTIONABLE_COUNT}" >> "$GITHUB_OUTPUT"
+          {
+            echo "total_count=${TOTAL_COUNT}"
+            echo "high_crit_count=${HIGH_CRIT_COUNT}"
+            echo "fixable_count=${FIXABLE_COUNT}"
+            echo "scout_total_count=${SCOUT_TOTAL_COUNT}"
+            echo "actionable_count=${ACTIONABLE_COUNT}"
+          } >> "$GITHUB_OUTPUT"
 
           cat nightly-report.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -123,8 +158,8 @@ jobs:
         with:
           name: nightly-security-report
           path: |
-            trivy-nightly.json
-            scout-nightly.sarif
+            trivy-nightly-*.json
+            scout-nightly-*.sarif
             nightly-report.md
 
       - name: Create or update GitHub issue
@@ -222,7 +257,7 @@ jobs:
                 owner,
                 repo,
                 issue_number: issue.number,
-                body: 'Nightly run found no actionable items (no fixable Trivy findings, no High/Critical Trivy findings, no Docker Scout findings). Closing this issue automatically.'
+                body: 'Nightly run found no actionable items across linux/amd64 and linux/arm64. Closing this issue automatically.'
               });
 
               await github.rest.issues.update({

@@ -1,10 +1,15 @@
+# syntax=docker/dockerfile:1.7
+
 FROM ubuntu:25.10
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Set arguments
 ARG RUNNER_VERSION=2.334.0
 ARG NODE_VERSION=24.15.0
 ARG NPM_VERSION=11.13.0
 ARG INSTALL_DOCKER_PLUGINS=false
+ARG TARGETOS
 ARG TARGETARCH
 ENV RUNNER_VERSION=${RUNNER_VERSION}
 ENV NODE_VERSION=${NODE_VERSION}
@@ -13,6 +18,7 @@ ENV NPM_VERSION=${NPM_VERSION}
 # Install dependencies
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
+# hadolint ignore=DL3008
 RUN apt-get update && \
     ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && \
     apt-get full-upgrade -y && \
@@ -21,9 +27,12 @@ RUN apt-get update && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub Actions runner (with checksum verification)
-RUN mkdir -p /actions-runner && cd /actions-runner && \
-    ARCH_SUFFIX="" && \
+WORKDIR /actions-runner
+RUN ARCH_SUFFIX="" && \
     NODE_ARCH="" && \
+    if [ "${TARGETOS:-linux}" != "linux" ]; then \
+      echo "Unsupported TARGETOS='${TARGETOS}'. This Docker image builds Linux runners only." ; exit 1 ; \
+    fi && \
     case "${TARGETARCH:-amd64}" in \
       amd64) ARCH_SUFFIX="linux-x64"; NODE_ARCH="x64" ;; \
       arm64) ARCH_SUFFIX="linux-arm64"; NODE_ARCH="arm64" ;; \
@@ -64,20 +73,21 @@ RUN mkdir -p /actions-runner && cd /actions-runner && \
     done
 
 # Prevent mount errors by preparing dummy repo path
-RUN mkdir -p /actions-runner/_work/_dummy/_dummy    
+RUN mkdir -p /actions-runner/_work/_dummy/_dummy
 
 # Install Docker (DinD) from official apt repository
 RUN install -m 0755 -d /etc/apt/keyrings && \
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && \
     chmod a+r /etc/apt/keyrings/docker.asc && \
-    tee /etc/apt/sources.list.d/docker.sources > /dev/null <<EOF
-Types: deb
-URIs: https://download.docker.com/linux/ubuntu
-Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
-Components: stable
-Architectures: $(dpkg --print-architecture)
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
+    printf '%s\n' \
+      "Types: deb" \
+      "URIs: https://download.docker.com/linux/ubuntu" \
+      "Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")" \
+      "Components: stable" \
+      "Architectures: $(dpkg --print-architecture)" \
+      "Signed-By: /etc/apt/keyrings/docker.asc" \
+      > /etc/apt/sources.list.d/docker.sources
+# hadolint ignore=DL3008
 RUN apt-get update && \
     apt-get full-upgrade -y && \
     apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io && \
@@ -90,17 +100,19 @@ RUN apt-get update && \
 # Label image for traceability
 LABEL runner-owner="ephemeral-runner"
 
+STOPSIGNAL SIGTERM
+
 # Healthcheck to ensure runner container is alive
-HEALTHCHECK CMD pgrep -f Runner.Listener || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD pgrep -f Runner.Listener || exit 1
 
 # Copy entrypoint
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh && \
-    useradd --create-home --shell /bin/bash --uid 1001 runner && \
+COPY --chmod=0755 entrypoint.sh /entrypoint.sh
+RUN useradd --create-home --shell /bin/bash --uid 1001 --no-log-init runner && \
     chown -R runner:runner /actions-runner
 
 # Default to root so DinD works out-of-the-box.
 # For least privilege in host-socket mode, users can still override with `--user 1001:1001`.
+# hadolint ignore=DL3002
 USER 0
 
 # Set default entrypoint

@@ -1,24 +1,46 @@
-# Github Action Runner 
+# GitHub Actions Runner for Docker
 
-Run a Github Actions Runner inside of a docker environment on an organisation level. This docker includes an internal docker instance (DinD) by default. The runner binary is checksum-verified during image build and at runtime, and Docker is installed from the official apt repository.
+Run an ephemeral GitHub Actions organization runner in a Docker container. The image starts Docker-in-Docker by default and can also use a host Docker socket when explicitly configured.
 
-# Installation 
+## Platform Support
 
-## CLI example (`docker run`)
+This project builds Linux runner images for:
+
+| Image platform | Typical hosts |
+|---|---|
+| `linux/amd64` | Linux x64, Windows Docker Desktop/WSL2 on x64 |
+| `linux/arm64` | Linux ARM64, macOS Apple Silicon Docker Desktop, Windows Docker Desktop/WSL2 on ARM64 |
+
+The container is still a Linux runner. It can run on Docker Desktop for macOS or Windows, but jobs that require native `runs-on: macos-*` or `runs-on: windows-*` need separate self-hosted runners installed directly on macOS or Windows hosts.
+
+## Run
+
+### Docker CLI
 
 ```bash
-  # Default (DinD): start Docker daemon inside the container
-  docker run --privileged --restart unless-stopped --user 0:0 --name github-runner --env=NAME=<NAME> --env=ORG=<ORG> --env=PAT=<PAT> -d nyffels/github-runner:latest
+# Docker-in-Docker mode
+docker run --privileged --restart unless-stopped --user 0:0 \
+  --name github-runner \
+  --env NAME=<NAME> \
+  --env ORG=<ORG> \
+  --env PAT=<PAT> \
+  -d nyffels/github-runner:latest
 
-  # Host Docker: use the host daemon via socket mount
-  docker run --restart unless-stopped --name github-runner --env=NAME=<NAME> --env=ORG=<ORG> --env=PAT=<PAT> --env=HOSTDOCKER=1 -v /var/run/docker.sock:/var/run/docker.sock -d nyffels/github-runner:latest
+# Host Docker socket mode
+docker run --restart unless-stopped \
+  --name github-runner \
+  --env NAME=<NAME> \
+  --env ORG=<ORG> \
+  --env PAT=<PAT> \
+  --env HOSTDOCKER=1 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -d nyffels/github-runner:latest
 ```
 
-## Docker Compose example
+### Docker Compose
 
 ```yaml
 services:
-  # DinD mode
   runner-dind:
     image: nyffels/github-runner:latest
     container_name: github-runner-dind
@@ -30,7 +52,6 @@ services:
       ORG: "${ORG}"
       PAT: "${PAT}"
 
-  # Host Docker mode
   runner-host:
     image: nyffels/github-runner:latest
     container_name: github-runner-host
@@ -44,30 +65,57 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 ```
 
-`--privileged` and `--user 0:0` are required for DinD so the container can start the Docker daemon and access the necessary kernel features. For host-socket mode (`HOSTDOCKER=1`), they are not required unless your Docker socket permissions require elevated access.
+`--privileged` and `--user 0:0` are required for Docker-in-Docker mode so the container can start Docker daemon internals. They are not normally required for host-socket mode unless the host socket permissions require them.
 
-Security note: `--privileged` grants broad kernel access inside the container, and mounting `/var/run/docker.sock` effectively grants root access on the host. Prefer DinD for better isolation (with higher resource usage), and if you use the host socket, run on dedicated hosts with restricted access.
+Mounting `/var/run/docker.sock` effectively grants root-equivalent access to the host. Use dedicated runner hosts and restrict who can run jobs on these labels.
 
-## Build options
+## Configuration
 
-The default image installs Docker Engine, Docker CLI, and containerd. Docker Buildx and Compose plugins can be included with:
+| Variable | Required | Default | Description |
+|---|---:|---|---|
+| `ORG` | Yes | | GitHub organization name. |
+| `PAT` | Yes | | Token with permission to create organization runner registration and removal tokens. |
+| `NAME` | No | `<hostname>-ephemeral` | Runner name registered in GitHub. |
+| `HOSTDOCKER` | No | `0` | Set to `1`, `true`, `yes`, or `on` to use the mounted host Docker socket. |
+| `LABELS` | No | | Extra comma-separated or semicolon-separated runner labels. |
+| `LABEL_MODE` | No | `append` | Use `append` to add `LABELS` to defaults or `replace` to use only `LABELS`. |
+| `RUNNER_WORK_DIRECTORY` | No | `_work` | Runner work directory under `/actions-runner`. |
+| `DOCKER_DRIVER` | No | `overlay2` | Docker-in-Docker storage driver. Falls back to `vfs` if startup fails. |
+| `DOCKER_DATA_ROOT` | No | `/var/lib/docker` | Docker-in-Docker data root. |
+| `DOCKERD_ARGS` | No | | Extra flags passed to `dockerd`. |
+
+Default runner labels are `ephemeral,docker,self-hosted`. GitHub also applies its own OS and architecture labels for the runner binary.
+
+## Build
+
+Local single-platform build:
+
+```bash
+docker build -t github-runner .
+```
+
+Multi-platform build for Linux x64 and ARM64:
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  --pull \
+  -t nyffels/github-runner:latest \
+  --push .
+```
+
+The default image installs Docker Engine, Docker CLI, and containerd. Docker Buildx and Compose plugins can be included when you need those commands inside runner jobs:
 
 ```bash
 docker build --build-arg INSTALL_DOCKER_PLUGINS=true -t github-runner .
 ```
 
-They are opt-in because the current upstream plugin packages may carry Go module findings before Docker publishes rebuilt plugin binaries.
+The plugins are opt-in because upstream plugin packages can carry Go module findings before Docker publishes rebuilt plugin binaries.
 
-# Environments 
+## Cleanup
 
-NAME = Name of docker runner in github.  
-ORG = ID of the organisation in github.  
-PAT = Personal access token of your user for requested runner tokens.  
-HOSTDOCKER = Set to "1" to use the docker of the host by a volume mount (ex. -v /var/run/docker.sock:/var/run/docker.sock). If set, the container will exit if the socket is missing.  
-CLEANUP NOTE = Host Docker cleanup only removes containers/images labeled `runner-owner=<NAME>`. If you want cleanup to be effective, label your job-created containers/images accordingly.  
+The runner is registered as ephemeral and removed on container shutdown when possible. In host Docker socket mode, cleanup only removes containers and images labeled with `runner-owner=<NAME>`. Label job-created Docker resources if you want the cleanup pass to remove them.
 
-# Legal information
-This image is created by "Nyffels BV" under the MIT license. 
+## License
 
-# Contribution
-Feel free to branch / fork this repo and make adjustments. To merge in the master branch, please open a issue and a PR in the github repo. 
+MIT. See [LICENSE](LICENSE).

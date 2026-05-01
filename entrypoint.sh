@@ -6,15 +6,27 @@ ORG="${ORG:-}"
 PAT="${PAT:-}"
 NAME="${NAME:-$(hostname)-ephemeral}"
 HOSTDOCKER="${HOSTDOCKER:-0}"
+GITHUB_API_VERSION="${GITHUB_API_VERSION:-2022-11-28}"
 
 export RUNNER_WORK_DIRECTORY="${RUNNER_WORK_DIRECTORY:-_work}"
 export ACTIONS_RUNNER_INPUT_REPLACE=true
 export RUNNER_ALLOW_RUNASROOT=1
 
+is_truthy() {
+  case "${1,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # -- Labels config --------------------------------------------------------
 DEFAULT_LABELS="ephemeral,docker,self-hosted"
 LABEL_MODE="${LABEL_MODE:-append}"   # append | replace
 CUSTOM_LABELS="${LABELS:-}"
+HOSTDOCKER_ENABLED=0
+if is_truthy "$HOSTDOCKER"; then
+  HOSTDOCKER_ENABLED=1
+fi
 
 normalize_labels() {
   local raw="$1"
@@ -52,17 +64,18 @@ echo "Using runner labels: ${EFFECTIVE_LABELS}"
 _CLEANED_UP="false"
 _runner_pid=""
 _dockerd_pid=""
-AUTH_HEADER="Authorization: token ${PAT}"
+_runner_configured="false"
+AUTH_HEADER="Authorization: Bearer ${PAT}"
 CURL_COMMON_OPTS=(--retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 30 -fsSL)
 
 api_post() {
   local url="$1"
-  curl "${CURL_COMMON_OPTS[@]}" -X POST -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" "${url}"
+  curl "${CURL_COMMON_OPTS[@]}" -X POST -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" "${url}"
 }
 
 api_get() {
   local url="$1"
-  curl "${CURL_COMMON_OPTS[@]}" -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" "${url}"
+  curl "${CURL_COMMON_OPTS[@]}" -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" "${url}"
 }
 
 wait_for_docker() {
@@ -140,7 +153,7 @@ cleanup() {
   if [[ -n "${_runner_pid}" ]] && kill -0 "${_runner_pid}" 2>/dev/null; then
     echo "Stopping runner process PID=${_runner_pid}..."
     kill -TERM "${_runner_pid}" 2>/dev/null || true
-    for i in {1..10}; do
+    for _ in {1..10}; do
       if kill -0 "${_runner_pid}" 2>/dev/null; then
         sleep 1
       else
@@ -159,7 +172,7 @@ cleanup() {
     wait "${_dockerd_pid}" 2>/dev/null || true
   fi
 
-  if [[ -f /actions-runner/config.sh && -x /actions-runner/bin/Runner.Listener ]]; then
+  if [[ "${_runner_configured}" == "true" && -f /actions-runner/config.sh && -x /actions-runner/bin/Runner.Listener ]]; then
     REMOVE_TOKEN="$(api_post "https://api.github.com/orgs/${ORG}/actions/runners/remove-token" \
       | jq -r '.token // empty' 2>/dev/null || true)"
 
@@ -171,7 +184,7 @@ cleanup() {
       ( cd /actions-runner && ./config.sh remove --unattended ) || true
     fi
   else
-    echo "INFO: Skip runner removal: /actions-runner/bin/Runner.Listener not present."
+    echo "INFO: Skip runner removal: runner was not configured in this container session."
   fi
 
   echo "Cleaning workspace (${RUNNER_WORK_DIRECTORY})..."
@@ -181,19 +194,13 @@ cleanup() {
     echo "INFO: Skip workspace cleanup: ${RUNNER_WORK_DIRECTORY} does not exist."
   fi
 
-  if [[ "$HOSTDOCKER" == "1" ]]; then
+  if [[ "$HOSTDOCKER_ENABLED" == "1" ]]; then
     echo "Cleaning up Docker containers and resources for this runner (label runner-owner=${NAME})..."
     docker ps -aq --filter "label=runner-owner=${NAME}" | xargs -r docker rm -f || true
     docker images -q --filter "label=runner-owner=${NAME}" | xargs -r docker rmi -f || true
     echo "Docker cleanup complete (filtered by label 'runner-owner=${NAME}')"
   fi
 }
-
-on_term() { echo "Caught TERM"; cleanup; exit 0; }
-on_int()  { echo "Caught INT";  cleanup; exit 130; }
-trap on_term TERM
-trap on_int INT
-trap cleanup EXIT
 
 # -- Guards ---------------------------------------------------------------
 if [[ -z "${PAT}" ]]; then
@@ -204,6 +211,12 @@ if [[ -z "${ORG}" ]]; then
   echo "ERROR: ORG environment variable is not set"
   exit 1
 fi
+
+on_term() { echo "Caught TERM"; cleanup; exit 0; }
+on_int()  { echo "Caught INT";  cleanup; exit 130; }
+trap on_term TERM
+trap on_int INT
+trap cleanup EXIT
 
 # -- Token fetch ----------------------------------------------------------
 echo "Fetching registration token from org '${ORG}'..."
@@ -224,11 +237,11 @@ if [[ ! -f ./config.sh ]]; then
   exit 1
 fi
 
-RUNNER_VERSION="${RUNNER_VERSION:-2.331.0}"
+RUNNER_VERSION="${RUNNER_VERSION:-2.334.0}"
 ARCH="$(uname -m)"
 case "$ARCH" in
-  x86_64) RUNNER_ARCH="linux-x64" ;;
-  aarch64) RUNNER_ARCH="linux-arm64" ;;
+  x86_64|amd64) RUNNER_ARCH="linux-x64" ;;
+  aarch64|arm64) RUNNER_ARCH="linux-arm64" ;;
   *) echo "ERROR: Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
@@ -261,7 +274,7 @@ if [[ -f ".runner" ]]; then
     | jq -r --arg NAME "$NAME" '.runners[] | select(.name==$NAME) | .id // empty' 2>/dev/null || true)"
   if [[ -z "${RUNNER_ID}" ]]; then
     echo "Stale local config detected. Removing local runner configuration..."
-    rm -f .runner
+    rm -f .runner .credentials .credentials_rsaparams
   else
     echo "GitHub knows this runner (ID: ${RUNNER_ID})"
   fi
@@ -278,8 +291,9 @@ echo "Configuring ephemeral runner..."
   --replace \
   --ephemeral \
   --labels "${EFFECTIVE_LABELS}"
+_runner_configured="true"
 
-if [[ "${HOSTDOCKER}" == "1" ]]; then
+if [[ "${HOSTDOCKER_ENABLED}" == "1" ]]; then
   if [[ ! -S /var/run/docker.sock ]]; then
     echo "ERROR: HOSTDOCKER=1 but /var/run/docker.sock is not mounted."
     exit 1

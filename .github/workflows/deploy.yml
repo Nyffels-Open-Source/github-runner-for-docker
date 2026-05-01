@@ -1,13 +1,20 @@
-name: Release to docker
+name: Release to Docker
+
 on:
   workflow_dispatch:
   push:
-    branches: ['main']
+    branches: ["main"]
 
 permissions:
   contents: read
-  packages: write
-  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: nyffels/github-runner
+  PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
   get_version:
@@ -15,11 +22,11 @@ jobs:
     outputs:
       version: ${{ env.VERSION }}
     steps:
-      - name: Set Calver Version
+      - name: Set CalVer version
         uses: Nyffels-IT/github-actions-calver-version-generator@v1.0.1
 
-      - name: Current verion
-        run: 'echo Version: ${{ env.VERSION }}'
+      - name: Show version
+        run: 'echo "Version: ${{ env.VERSION }}"'
 
   get_runner_version:
     runs-on: ubuntu-latest
@@ -30,71 +37,93 @@ jobs:
         id: extract
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # optioneel, verhoogt rate limit
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "🔍 Fetching GitHub Actions runner releases..."
-          response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/repos/actions/runner/releases)
+          set -euo pipefail
 
-          if echo "$response" | jq empty >/dev/null 2>&1; then
-            version=$(echo "$response" | jq -r '[.[] | select(.prerelease == false and .draft == false)][0].tag_name' | tr -d 'v')
-            echo "✅ Latest Runner Version: $version"
-            echo "version=$version" >> "$GITHUB_OUTPUT"
-          else
-            echo "❌ Failed to fetch valid JSON from GitHub API:"
-            echo "$response"
+          auth_args=()
+          if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+            auth_args=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+          fi
+
+          version="$(
+            curl -fsSL "${auth_args[@]}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              https://api.github.com/repos/actions/runner/releases/latest \
+              | jq -r '.tag_name | sub("^v"; "")'
+          )"
+
+          if [[ -z "$version" || "$version" == "null" ]]; then
+            echo "Could not determine latest runner version"
             exit 1
           fi
+
+          echo "Latest runner version: $version"
+          {
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
 
   deploy-qa:
     runs-on: ubuntu-latest
     needs: [get_version, get_runner_version]
     steps:
-      - name: Copy Repo Files
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to DockerHub
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+      - name: Build and push QA image
+        uses: docker/build-push-action@v6
         with:
           context: .
           pull: true
           push: true
+          platforms: ${{ env.PLATFORMS }}
           sbom: true
           provenance: mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-args: |
             RUNNER_VERSION=${{ needs.get_runner_version.outputs.runner_version }}
           tags: |
-            nyffels/github-runner:qa-${{ needs.get_version.outputs.version }}
+            ${{ env.IMAGE_NAME }}:qa-${{ needs.get_version.outputs.version }}
 
   scan-trivy:
-    name: "Security: Trivy"
+    name: "Security: Trivy (${{ matrix.platform }})"
     runs-on: ubuntu-latest
     needs: [deploy-qa, get_version]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
     env:
       IMAGE_REF: nyffels/github-runner:qa-${{ needs.get_version.outputs.version }}
+      TRIVY_PLATFORM: ${{ matrix.platform }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Login to DockerHub
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Pull image
-        run: docker pull $IMAGE_REF
-
-      - name: Scan
-        uses: aquasecurity/trivy-action@0.24.0
+      - name: Scan image
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ env.IMAGE_REF }}
           severity: CRITICAL,HIGH
@@ -102,27 +131,29 @@ jobs:
           trivyignores: .trivyignore
 
   scan-trivy-non-blocking:
-    name: "Security: Trivy (non-blocking)"
+    name: "Security: Trivy non-blocking (${{ matrix.platform }})"
     runs-on: ubuntu-latest
     continue-on-error: true
     needs: [deploy-qa, get_version]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
     env:
       IMAGE_REF: nyffels/github-runner:qa-${{ needs.get_version.outputs.version }}
+      TRIVY_PLATFORM: ${{ matrix.platform }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Login to DockerHub
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Pull image
-        run: docker pull $IMAGE_REF
-
-      - name: Scan
-        uses: aquasecurity/trivy-action@0.24.0
+      - name: Scan image
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ env.IMAGE_REF }}
           severity: LOW,MEDIUM
@@ -130,90 +161,85 @@ jobs:
           trivyignores: .trivyignore
 
   scan-scout:
-    name: "Security: Docker Scout"
+    name: "Security: Docker Scout (${{ matrix.platform }})"
     runs-on: ubuntu-latest
     needs: [deploy-qa, get_version]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
     env:
       IMAGE_REF: nyffels/github-runner:qa-${{ needs.get_version.outputs.version }}
-      SCOUT_TEMP_ALLOW_UNTIL: "2026-04-15"
+      PLATFORM: ${{ matrix.platform }}
     steps:
-      - name: Login to DockerHub
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Pull image
-        run: docker pull $IMAGE_REF
 
       - name: Install Docker Scout
         run: |
           curl -fsSL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh | sh
           docker scout version
 
-      - name: Scan
+      - name: Scan image
         shell: bash
         run: |
           set -euo pipefail
 
-          ALLOWED_CVES=("CVE-2025-68121" "CVE-2025-61726" "CVE-2026-23111")
-          TODAY="$(date -u +%F)"
-          if [[ "$TODAY" > "$SCOUT_TEMP_ALLOW_UNTIL" ]]; then
-            ALLOWED_CVES=()
-            echo "Temporary Scout allowlist expired on ${SCOUT_TEMP_ALLOW_UNTIL}."
-          else
-            echo "Temporary Scout allowlist active until ${SCOUT_TEMP_ALLOW_UNTIL}."
-          fi
+          docker scout cves "$IMAGE_REF" \
+            --platform "$PLATFORM" \
+            --only-severity critical,high \
+            --format sarif > scout.sarif || true
 
-          docker scout cves "$IMAGE_REF" --only-severity critical,high --format sarif > scout.sarif || true
-
-          ALLOWED_JSON="$(printf '%s\n' "${ALLOWED_CVES[@]}" | jq -R . | jq -s .)"
-          BLOCKING_COUNT="$(jq --argjson allowed "$ALLOWED_JSON" '[.runs[].results[]? | select((.ruleId as $id | $allowed | index($id)) | not)] | length' scout.sarif)"
-
-          if [[ "$BLOCKING_COUNT" -gt 0 ]]; then
-            echo "Blocking critical/high CVEs found (excluding temporary allowlist):"
-            jq -r --argjson allowed "$ALLOWED_JSON" '.runs[].results[]? | select((.ruleId as $id | $allowed | index($id)) | not) | .ruleId' scout.sarif | sort -u
+          blocking_count="$(jq '[.runs[].results[]?] | length' scout.sarif)"
+          if [[ "$blocking_count" -gt 0 ]]; then
+            echo "Blocking critical/high CVEs found for ${PLATFORM}:"
+            jq -r '.runs[].results[]? | .ruleId' scout.sarif | sort -u
             exit 1
           fi
 
-          echo "No blocking critical/high CVEs outside temporary allowlist."
+          echo "No blocking critical/high CVEs for ${PLATFORM}."
 
   scan-scout-non-blocking:
-    name: "Security: Docker Scout (non-blocking)"
+    name: "Security: Docker Scout non-blocking (${{ matrix.platform }})"
     runs-on: ubuntu-latest
     continue-on-error: true
     needs: [deploy-qa, get_version]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
     env:
       IMAGE_REF: nyffels/github-runner:qa-${{ needs.get_version.outputs.version }}
+      PLATFORM: ${{ matrix.platform }}
     steps:
-      - name: Login to DockerHub
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Pull image
-        run: docker pull $IMAGE_REF
 
       - name: Install Docker Scout
         run: |
           curl -fsSL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh | sh
           docker scout version
 
-      - name: Scan
+      - name: Scan image
         shell: bash
         run: |
           set -euo pipefail
-          docker scout cves "$IMAGE_REF" --only-severity medium,low --format sarif > scout-nonblocking.sarif || true
 
-      - name: Non-blocking gate (soft-fail)
-        shell: bash
-        run: |
-          set -euo pipefail
-          NON_BLOCKING_COUNT="$(jq '[.runs[].results[]?] | length' scout-nonblocking.sarif)"
-          echo "Docker Scout non-blocking findings count: ${NON_BLOCKING_COUNT}"
-          if [[ "$NON_BLOCKING_COUNT" -gt 0 ]]; then
-            echo "Docker Scout non-blocking findings detected: ${NON_BLOCKING_COUNT}"
+          docker scout cves "$IMAGE_REF" \
+            --platform "$PLATFORM" \
+            --only-severity medium,low \
+            --format sarif > scout-nonblocking.sarif || true
+
+          finding_count="$(jq '[.runs[].results[]?] | length' scout-nonblocking.sarif)"
+          echo "Docker Scout non-blocking findings for ${PLATFORM}: ${finding_count}"
+
+          if [[ "$finding_count" -gt 0 ]]; then
             echo "| CVE | Summary |"
             echo "|---|---|"
             jq -r '
@@ -226,21 +252,16 @@ jobs:
                   printf '| %s | %s |\n' "$cve" "$summary"
                 done
             exit 1
-          else
-            echo "No non-blocking Docker Scout findings."
           fi
 
   deploy:
     runs-on: ubuntu-latest
     needs: [get_version, scan-trivy, scan-scout]
     steps:
-      - name: Copy Repo Files
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to DockerHub
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKER_USERNAME }}
@@ -250,17 +271,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          QA_IMAGE="nyffels/github-runner:qa-${{ needs.get_version.outputs.version }}"
-          RELEASE_IMAGE="nyffels/github-runner:${{ needs.get_version.outputs.version }}"
-          LATEST_IMAGE="nyffels/github-runner:latest"
 
-          DIGEST="$(docker buildx imagetools inspect "$QA_IMAGE" | awk '/^Digest:/ {print $2; exit}')"
-          if [[ -z "$DIGEST" ]]; then
-            echo "Could not resolve digest for $QA_IMAGE"
+          qa_image="${{ env.IMAGE_NAME }}:qa-${{ needs.get_version.outputs.version }}"
+          release_image="${{ env.IMAGE_NAME }}:${{ needs.get_version.outputs.version }}"
+          latest_image="${{ env.IMAGE_NAME }}:latest"
+
+          digest="$(docker buildx imagetools inspect "$qa_image" | awk '/^Digest:/ {print $2; exit}')"
+          if [[ -z "$digest" ]]; then
+            echo "Could not resolve digest for $qa_image"
             exit 1
           fi
 
           docker buildx imagetools create \
-            --tag "$RELEASE_IMAGE" \
-            --tag "$LATEST_IMAGE" \
-            "nyffels/github-runner@$DIGEST"
+            --tag "$release_image" \
+            --tag "$latest_image" \
+            "${{ env.IMAGE_NAME }}@$digest"
