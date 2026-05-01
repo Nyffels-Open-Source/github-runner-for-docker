@@ -8,10 +8,10 @@ Run a Github Actions Runner inside of a docker environment on an organisation le
 
 ```bash
   # Default (DinD): start Docker daemon inside the container
-  docker run --privileged --user 0:0 --name github-runner --env=NAME=<NAME> --env=ORG=<ORG> --env=PAT=<PAT> -d nyffels/github-runner:latest
+  docker run --privileged --restart unless-stopped --user 0:0 --name github-runner --env=NAME=<NAME> --env=ORG=<ORG> --env=PAT=<PAT> -d nyffels/github-runner:latest
 
   # Host Docker: use the host daemon via socket mount
-  docker run --name github-runner --env=NAME=<NAME> --env=ORG=<ORG> --env=PAT=<PAT> --env=HOSTDOCKER=1 -v /var/run/docker.sock:/var/run/docker.sock -d nyffels/github-runner:latest
+  docker run --restart unless-stopped --name github-runner --env=NAME=<NAME> --env=ORG=<ORG> --env=PAT=<PAT> --env=HOSTDOCKER=1 -v /var/run/docker.sock:/var/run/docker.sock -d nyffels/github-runner:latest
 ```
 
 ## Docker Compose example
