@@ -1,8 +1,8 @@
-name: Nightly Security Check
+name: Weekly Security Check
 
 on:
   schedule:
-    - cron: "30 2 * * *"
+    - cron: "30 2 * * 1"
   workflow_dispatch:
 
 permissions:
