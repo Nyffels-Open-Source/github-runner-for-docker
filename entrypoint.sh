@@ -78,6 +78,11 @@ api_get() {
   curl "${CURL_COMMON_OPTS[@]}" -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" "${url}"
 }
 
+api_delete() {
+  local url="$1"
+  curl "${CURL_COMMON_OPTS[@]}" -X DELETE -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" "${url}"
+}
+
 wait_for_docker() {
   local timeout_seconds="${1:-30}"
   local waited=0
@@ -172,7 +177,8 @@ cleanup() {
     wait "${_dockerd_pid}" 2>/dev/null || true
   fi
 
-  if [[ "${_runner_configured}" == "true" && -f /actions-runner/config.sh && -x /actions-runner/bin/Runner.Listener ]]; then
+  if [[ -f /actions-runner/config.sh && -x /actions-runner/bin/Runner.Listener ]] && \
+     [[ "${_runner_configured}" == "true" || -f /actions-runner/.runner ]]; then
     REMOVE_TOKEN="$(api_post "https://api.github.com/orgs/${ORG}/actions/runners/remove-token" \
       | jq -r '.token // empty' 2>/dev/null || true)"
 
@@ -184,7 +190,7 @@ cleanup() {
       ( cd /actions-runner && ./config.sh remove --unattended ) || true
     fi
   else
-    echo "INFO: Skip runner removal: runner was not configured in this container session."
+    echo "INFO: Skip runner removal: runner binary not present or runner was never configured."
   fi
 
   echo "Cleaning workspace (${RUNNER_WORK_DIRECTORY})..."
@@ -266,18 +272,32 @@ fi
 mkdir -p "/actions-runner/${RUNNER_WORK_DIRECTORY}"
 export RUNNER_WORK_DIRECTORY="/actions-runner/${RUNNER_WORK_DIRECTORY}"
 
-# -- Stale config check ---------------------------------------------------
-echo "Checking for stale local configuration..."
-if [[ -f ".runner" ]]; then
-  echo "WARN: Local .runner config exists. Checking if GitHub knows about this runner..."
-  RUNNER_ID="$(api_get "https://api.github.com/orgs/${ORG}/actions/runners" \
-    | jq -r --arg NAME "$NAME" '.runners[] | select(.name==$NAME) | .id // empty' 2>/dev/null || true)"
-  if [[ -z "${RUNNER_ID}" ]]; then
-    echo "Stale local config detected. Removing local runner configuration..."
-    rm -f .runner .credentials .credentials_rsaparams
+# -- Stale runner deregistration ------------------------------------------
+echo "Checking GitHub for existing runner named '${NAME}'..."
+RUNNER_ID="$(api_get "https://api.github.com/orgs/${ORG}/actions/runners" \
+  | jq -r --arg NAME "$NAME" '.runners[] | select(.name==$NAME) | .id // empty' 2>/dev/null || true)"
+
+if [[ -n "${RUNNER_ID}" ]]; then
+  echo "Found existing runner '${NAME}' (ID: ${RUNNER_ID}) on GitHub. Deregistering..."
+  if [[ -f ".runner" && -x bin/Runner.Listener ]]; then
+    REMOVE_TOKEN="$(api_post "https://api.github.com/orgs/${ORG}/actions/runners/remove-token" \
+      | jq -r '.token // empty' 2>/dev/null || true)"
+    if [[ -n "${REMOVE_TOKEN}" ]]; then
+      ./config.sh remove --token "${REMOVE_TOKEN}" --unattended || true
+    else
+      echo "WARN: Could not obtain remove token; falling back to direct API deletion..."
+      api_delete "https://api.github.com/orgs/${ORG}/actions/runners/${RUNNER_ID}" || true
+    fi
   else
-    echo "GitHub knows this runner (ID: ${RUNNER_ID})"
+    api_delete "https://api.github.com/orgs/${ORG}/actions/runners/${RUNNER_ID}" || true
   fi
+  rm -f .runner .credentials .credentials_rsaparams
+  echo "Existing runner '${NAME}' deregistered."
+elif [[ -f ".runner" ]]; then
+  echo "Local .runner config found but no matching runner on GitHub. Cleaning local files..."
+  rm -f .runner .credentials .credentials_rsaparams
+else
+  echo "No existing runner found. Proceeding with fresh registration."
 fi
 
 # -- Configure & run ------------------------------------------------------
