@@ -122,7 +122,7 @@ The plugins can carry Go module findings before Docker publishes rebuilt plugin 
 
 The runner is registered as ephemeral and removed on container shutdown when possible. The workspace is cleaned both at startup and shutdown, so a hard crash cannot leave the next job with the previous workspace. The private Docker-in-Docker daemon is also pruned at startup and after every run unless `RUNNER_CLEANUP_DOCKER=0`.
 
-After a container-engine or host crash, startup removes every GitHub runner registration that exactly matches `NAME`, clears the local registration files, and registers a fresh ephemeral runner. This avoids trying to recover a server registration that GitHub has already invalidated. If GitHub invalidates a new registration before the runner creates its session, the container re-registers up to `RUNNER_SESSION_RETRIES` times.
+After a container-engine or host crash, startup removes every GitHub runner registration that exactly matches `NAME`, clears the local registration files, and registers a fresh ephemeral runner. This avoids trying to recover a server registration that GitHub has already invalidated. If GitHub invalidates a new registration before the runner creates its session, the container prints the relevant runner diagnostics and re-registers up to `RUNNER_SESSION_RETRIES` times.
 
 Use a unique `NAME` for every concurrently running container. Two live containers with the same name can replace each other's GitHub registration.
 

@@ -115,6 +115,24 @@ clean_workspace() {
   fi
 }
 
+show_runner_diagnostics() {
+  local latest_log
+  if [[ ! -d /actions-runner/_diag ]]; then
+    echo "WARN: Runner diagnostic directory was not found."
+    return 0
+  fi
+  latest_log="$(find /actions-runner/_diag -maxdepth 1 -type f -name 'Runner_*.log' \
+    -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-)"
+  if [[ -z "${latest_log}" ]]; then
+    echo "WARN: No runner diagnostic log was found."
+    return 0
+  fi
+
+  echo "Latest runner diagnostic errors (${latest_log}):"
+  grep -E ' (ERR|WARN) |HTTP Status|Correlation ID' "${latest_log}" | tail -n 80 || \
+    tail -n 80 "${latest_log}" || true
+}
+
 cleanup_docker_resources() {
   if [[ "${HOSTDOCKER_ENABLED}" == "1" ]]; then
     echo "Cleaning host Docker resources labeled runner-owner=${NAME}..."
@@ -305,7 +323,7 @@ if [[ ! -f ./config.sh ]]; then
   exit 1
 fi
 
-RUNNER_VERSION="${RUNNER_VERSION:-2.334.0}"
+RUNNER_VERSION="${RUNNER_VERSION:-2.336.0}"
 ARCH="$(uname -m)"
 case "$ARCH" in
   x86_64|amd64) RUNNER_ARCH="linux-x64" ;;
@@ -330,6 +348,7 @@ if [[ ! -x ./bin/Runner.Listener ]]; then
     ./bin/installdependencies.sh || true
   fi
 fi
+echo "Installed GitHub Actions runner version: $(./bin/Runner.Listener --version)"
 
 mkdir -p "/actions-runner/${RUNNER_WORK_DIRECTORY}"
 export RUNNER_WORK_DIRECTORY="/actions-runner/${RUNNER_WORK_DIRECTORY}"
@@ -400,7 +419,9 @@ fi
 runner_attempt=0
 while true; do
   echo "Starting runner..."
-  ./run.sh &
+  # run.sh converts Runner.Listener's terminal error status (1) into success (0),
+  # which prevents the registration retry logic below from running.
+  ./bin/Runner.Listener run &
   _runner_pid=$!
   runner_exit=0
   wait "${_runner_pid}" || runner_exit=$?
@@ -410,6 +431,7 @@ while true; do
   if [[ "${runner_exit}" -eq 0 ]]; then
     exit 0
   fi
+  show_runner_diagnostics
   if (( runner_attempt >= RUNNER_SESSION_RETRIES )); then
     echo "ERROR: Runner failed after $((runner_attempt + 1)) attempt(s); giving up."
     exit "${runner_exit}"
