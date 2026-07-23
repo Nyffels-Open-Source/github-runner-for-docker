@@ -2,6 +2,8 @@
 
 Run an ephemeral GitHub Actions organization runner in a Docker container. The image starts Docker-in-Docker by default and can also use a host Docker socket when explicitly configured.
 
+The image uses Ubuntu 26.04 LTS and pins the runner version at build time. Runner self-updates are disabled inside the container; rebuild the image regularly to pick up runner, operating-system, Node.js, npm, and Docker security updates.
+
 ## Platform Support
 
 This project builds Linux runner images for:
@@ -84,6 +86,7 @@ Mounting `/var/run/docker.sock` effectively grants root-equivalent access to the
 | `DOCKER_DATA_ROOT` | No | `/var/lib/docker` | Docker-in-Docker data root. |
 | `DOCKERD_ARGS` | No | | Extra flags passed to `dockerd`. |
 | `RUNNER_SESSION_RETRIES` | No | `3` | Number of times to re-register after the runner exits with an error before the container exits. |
+| `RUNNER_CLEANUP_DOCKER` | No | `1` | Remove all containers, images, volumes, networks, and build cache from the private Docker-in-Docker daemon after each job. |
 
 Default runner labels are `ephemeral,docker,self-hosted`. GitHub also applies its own OS and architecture labels for the runner binary.
 
@@ -117,11 +120,15 @@ The plugins can carry Go module findings before Docker publishes rebuilt plugin 
 
 ## Cleanup
 
-The runner is registered as ephemeral and removed on container shutdown when possible. After a container-engine or host crash, a restarted container reuses its matching local registration when GitHub still has it. If GitHub invalidates a new registration before the runner creates its session, the container re-registers up to `RUNNER_SESSION_RETRIES` times.
+The runner is registered as ephemeral and removed on container shutdown when possible. The workspace is cleaned both at startup and shutdown, so a hard crash cannot leave the next job with the previous workspace. The private Docker-in-Docker daemon is also pruned at startup and after every run unless `RUNNER_CLEANUP_DOCKER=0`.
+
+After a container-engine or host crash, a restarted container reuses its matching local registration when GitHub still has it. If GitHub invalidates a new registration before the runner creates its session, the container re-registers up to `RUNNER_SESSION_RETRIES` times.
 
 Use a unique `NAME` for every concurrently running container. Two live containers with the same name can replace each other's GitHub registration.
 
-In host Docker socket mode, cleanup only removes containers and images labeled with `runner-owner=<NAME>`. Label job-created Docker resources if you want the cleanup pass to remove them.
+In host Docker socket mode, cleanup only removes containers and images labeled with `runner-owner=<NAME>`. A shared host daemon cannot safely be pruned globally because it may contain resources belonging to other workloads. Label job-created Docker resources if you want the cleanup pass to remove them.
+
+For a security-grade clean environment, run one container per job and have an external supervisor remove and recreate the container after it exits. Docker restart policies restart the same writable container filesystem, so no script inside that container can guarantee removal of arbitrary files or modifications made outside the workspace. Docker-in-Docker is the recommended mode when jobs are not fully trusted.
 
 ## License
 
