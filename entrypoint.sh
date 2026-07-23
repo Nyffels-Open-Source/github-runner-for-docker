@@ -346,30 +346,26 @@ if ! jq -e '.runners | type == "array"' >/dev/null 2>&1 <<< "${RUNNERS_JSON}"; t
   echo "ERROR: GitHub returned an invalid runner-list response; refusing to modify local registration state."
   exit 1
 fi
-RUNNER_ID="$(jq -r --arg NAME "$NAME" \
-  '[.runners[] | select(.name==$NAME) | .id][0] // empty' <<< "${RUNNERS_JSON}")"
-LOCAL_RUNNER_ID=""
-if [[ -f ".runner" ]]; then
-  LOCAL_RUNNER_ID="$(jq -r '.agentId // empty' .runner 2>/dev/null || true)"
-fi
+mapfile -t RUNNER_IDS < <(jq -r --arg NAME "$NAME" \
+  '.runners[] | select(.name==$NAME) | .id' <<< "${RUNNERS_JSON}")
 
-if [[ -n "${RUNNER_ID}" && "${LOCAL_RUNNER_ID}" == "${RUNNER_ID}" ]]; then
-  echo "Recovering existing runner '${NAME}' (ID: ${RUNNER_ID}) from local configuration."
-  _runner_configured="true"
-elif [[ -n "${RUNNER_ID}" ]]; then
-  echo "Found existing runner '${NAME}' (ID: ${RUNNER_ID}) on GitHub. Deregistering..."
-  if ! api_delete "https://api.github.com/orgs/${ORG}/actions/runners/${RUNNER_ID}"; then
-    echo "ERROR: Could not deregister stale runner '${NAME}'; refusing to replace it."
-    exit 1
-  fi
-  clear_local_runner_config
-  echo "Existing runner '${NAME}' deregistered."
-elif [[ -f ".runner" ]]; then
-  echo "Local .runner config found but no matching runner on GitHub. Cleaning local files..."
-  clear_local_runner_config
+if (( ${#RUNNER_IDS[@]} > 0 )); then
+  for RUNNER_ID in "${RUNNER_IDS[@]}"; do
+    echo "Found existing runner '${NAME}' (ID: ${RUNNER_ID}) on GitHub. Deregistering..."
+    if ! api_delete "https://api.github.com/orgs/${ORG}/actions/runners/${RUNNER_ID}"; then
+      echo "ERROR: Could not deregister stale runner '${NAME}' (ID: ${RUNNER_ID}); refusing to replace it."
+      exit 1
+    fi
+  done
+  echo "Existing runner registration(s) for '${NAME}' deregistered."
 else
   echo "No existing runner found. Proceeding with fresh registration."
 fi
+
+if [[ -f ".runner" || -f ".credentials" || -f ".credentials_rsaparams" ]]; then
+  echo "Clearing local runner registration before fresh registration..."
+fi
+clear_local_runner_config
 
 # -- Docker setup ---------------------------------------------------------
 if [[ "${HOSTDOCKER_ENABLED}" == "1" ]]; then
