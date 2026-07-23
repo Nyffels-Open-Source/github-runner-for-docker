@@ -7,6 +7,7 @@ PAT="${PAT:-}"
 NAME="${NAME:-$(hostname)-ephemeral}"
 HOSTDOCKER="${HOSTDOCKER:-0}"
 GITHUB_API_VERSION="${GITHUB_API_VERSION:-2022-11-28}"
+RUNNER_SESSION_RETRIES="${RUNNER_SESSION_RETRIES:-3}"
 
 export RUNNER_WORK_DIRECTORY="${RUNNER_WORK_DIRECTORY:-_work}"
 export ACTIONS_RUNNER_INPUT_REPLACE=true
@@ -81,6 +82,43 @@ api_get() {
 api_delete() {
   local url="$1"
   curl "${CURL_COMMON_OPTS[@]}" -X DELETE -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" "${url}"
+}
+
+fetch_registration_token() {
+  local api_url="https://api.github.com/orgs/${ORG}/actions/runners/registration-token"
+  local token
+
+  echo "Fetching registration token from org '${ORG}'..." >&2
+  echo "Api URL: ${api_url}" >&2
+  token="$(api_post "${api_url}" | jq -r '.token // empty' 2>/dev/null || true)"
+  if [[ -z "${token}" ]]; then
+    echo "ERROR: Failed to retrieve registration token" >&2
+    return 1
+  fi
+  echo "Registration token received" >&2
+  printf '%s' "${token}"
+}
+
+clear_local_runner_config() {
+  rm -f /actions-runner/.runner \
+    /actions-runner/.credentials \
+    /actions-runner/.credentials_rsaparams
+}
+
+configure_runner() {
+  local registration_token="$1"
+
+  echo "Configuring ephemeral runner..."
+  ./config.sh \
+    --url "https://github.com/${ORG}" \
+    --token "${registration_token}" \
+    --name "${NAME}" \
+    --work "${RUNNER_WORK_DIRECTORY}" \
+    --unattended \
+    --replace \
+    --ephemeral \
+    --labels "${EFFECTIVE_LABELS}"
+  _runner_configured="true"
 }
 
 wait_for_docker() {
@@ -184,10 +222,10 @@ cleanup() {
 
     if [[ -n "${REMOVE_TOKEN}" ]]; then
       echo "Remove token acquired, removing runner non-interactively..."
-      ( cd /actions-runner && ./config.sh remove --token "${REMOVE_TOKEN}" --unattended ) || true
+      ( cd /actions-runner && ./config.sh remove --token "${REMOVE_TOKEN}" ) || true
     else
-      echo "WARN: Could not obtain remove token; attempting best-effort unattended removal..."
-      ( cd /actions-runner && ./config.sh remove --unattended ) || true
+      echo "WARN: Could not obtain remove token; local runner files will be removed."
+      clear_local_runner_config
     fi
   else
     echo "INFO: Skip runner removal: runner binary not present or runner was never configured."
@@ -217,23 +255,16 @@ if [[ -z "${ORG}" ]]; then
   echo "ERROR: ORG environment variable is not set"
   exit 1
 fi
+if [[ ! "${RUNNER_SESSION_RETRIES}" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: RUNNER_SESSION_RETRIES must be a non-negative integer"
+  exit 1
+fi
 
 on_term() { echo "Caught TERM"; cleanup; exit 0; }
 on_int()  { echo "Caught INT";  cleanup; exit 130; }
 trap on_term TERM
 trap on_int INT
 trap cleanup EXIT
-
-# -- Token fetch ----------------------------------------------------------
-echo "Fetching registration token from org '${ORG}'..."
-API_URL="https://api.github.com/orgs/${ORG}/actions/runners/registration-token"
-echo "Api URL: ${API_URL}"
-REG_TOKEN="$(api_post "${API_URL}" | jq -r '.token // empty' 2>/dev/null || true)"
-if [[ -z "${REG_TOKEN}" ]]; then
-  echo "ERROR: Failed to retrieve registration token"
-  exit 1
-fi
-echo "Registration token received"
 
 # -- Runner install -------------------------------------------------------
 cd /actions-runner
@@ -274,45 +305,30 @@ export RUNNER_WORK_DIRECTORY="/actions-runner/${RUNNER_WORK_DIRECTORY}"
 
 # -- Stale runner deregistration ------------------------------------------
 echo "Checking GitHub for existing runner named '${NAME}'..."
-RUNNER_ID="$(api_get "https://api.github.com/orgs/${ORG}/actions/runners" \
+ENCODED_RUNNER_NAME="$(jq -rn --arg value "${NAME}" '$value | @uri')"
+RUNNER_ID="$(api_get "https://api.github.com/orgs/${ORG}/actions/runners?name=${ENCODED_RUNNER_NAME}&per_page=100" \
   | jq -r --arg NAME "$NAME" '.runners[] | select(.name==$NAME) | .id // empty' 2>/dev/null || true)"
+LOCAL_RUNNER_ID=""
+if [[ -f ".runner" ]]; then
+  LOCAL_RUNNER_ID="$(jq -r '.agentId // empty' .runner 2>/dev/null || true)"
+fi
 
-if [[ -n "${RUNNER_ID}" ]]; then
+if [[ -n "${RUNNER_ID}" && "${LOCAL_RUNNER_ID}" == "${RUNNER_ID}" ]]; then
+  echo "Recovering existing runner '${NAME}' (ID: ${RUNNER_ID}) from local configuration."
+  _runner_configured="true"
+elif [[ -n "${RUNNER_ID}" ]]; then
   echo "Found existing runner '${NAME}' (ID: ${RUNNER_ID}) on GitHub. Deregistering..."
-  if [[ -f ".runner" && -x bin/Runner.Listener ]]; then
-    REMOVE_TOKEN="$(api_post "https://api.github.com/orgs/${ORG}/actions/runners/remove-token" \
-      | jq -r '.token // empty' 2>/dev/null || true)"
-    if [[ -n "${REMOVE_TOKEN}" ]]; then
-      ./config.sh remove --token "${REMOVE_TOKEN}" --unattended || true
-    else
-      echo "WARN: Could not obtain remove token; falling back to direct API deletion..."
-      api_delete "https://api.github.com/orgs/${ORG}/actions/runners/${RUNNER_ID}" || true
-    fi
-  else
-    api_delete "https://api.github.com/orgs/${ORG}/actions/runners/${RUNNER_ID}" || true
-  fi
-  rm -f .runner .credentials .credentials_rsaparams
+  api_delete "https://api.github.com/orgs/${ORG}/actions/runners/${RUNNER_ID}" || true
+  clear_local_runner_config
   echo "Existing runner '${NAME}' deregistered."
 elif [[ -f ".runner" ]]; then
   echo "Local .runner config found but no matching runner on GitHub. Cleaning local files..."
-  rm -f .runner .credentials .credentials_rsaparams
+  clear_local_runner_config
 else
   echo "No existing runner found. Proceeding with fresh registration."
 fi
 
-# -- Configure & run ------------------------------------------------------
-echo "Configuring ephemeral runner..."
-./config.sh \
-  --url "https://github.com/${ORG}" \
-  --token "${REG_TOKEN}" \
-  --name "${NAME}" \
-  --work "${RUNNER_WORK_DIRECTORY}" \
-  --unattended \
-  --replace \
-  --ephemeral \
-  --labels "${EFFECTIVE_LABELS}"
-_runner_configured="true"
-
+# -- Docker setup ---------------------------------------------------------
 if [[ "${HOSTDOCKER_ENABLED}" == "1" ]]; then
   if [[ ! -S /var/run/docker.sock ]]; then
     echo "ERROR: HOSTDOCKER=1 but /var/run/docker.sock is not mounted."
@@ -335,8 +351,36 @@ else
   fi
 fi
 
-echo "Starting runner..."
-./run.sh &
-_runner_pid=$!
-wait "${_runner_pid}" || true
-echo "Runner process exited."
+# -- Configure & run ------------------------------------------------------
+if [[ "${_runner_configured}" != "true" ]]; then
+  REG_TOKEN="$(fetch_registration_token)"
+  configure_runner "${REG_TOKEN}"
+fi
+
+runner_attempt=0
+while true; do
+  echo "Starting runner..."
+  ./run.sh &
+  _runner_pid=$!
+  runner_exit=0
+  wait "${_runner_pid}" || runner_exit=$?
+  _runner_pid=""
+  echo "Runner process exited with status ${runner_exit}."
+
+  if [[ "${runner_exit}" -eq 0 ]]; then
+    exit 0
+  fi
+  if (( runner_attempt >= RUNNER_SESSION_RETRIES )); then
+    echo "ERROR: Runner failed after $((runner_attempt + 1)) attempt(s); giving up."
+    exit "${runner_exit}"
+  fi
+
+  runner_attempt=$((runner_attempt + 1))
+  retry_delay=$((runner_attempt * 5))
+  echo "WARN: Runner session failed; re-registering in ${retry_delay}s (retry ${runner_attempt}/${RUNNER_SESSION_RETRIES})..."
+  sleep "${retry_delay}"
+  clear_local_runner_config
+  _runner_configured="false"
+  REG_TOKEN="$(fetch_registration_token)"
+  configure_runner "${REG_TOKEN}"
+done

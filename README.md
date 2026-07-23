@@ -83,6 +83,7 @@ Mounting `/var/run/docker.sock` effectively grants root-equivalent access to the
 | `DOCKER_DRIVER` | No | `overlay2` | Docker-in-Docker storage driver. Falls back to `vfs` if startup fails. |
 | `DOCKER_DATA_ROOT` | No | `/var/lib/docker` | Docker-in-Docker data root. |
 | `DOCKERD_ARGS` | No | | Extra flags passed to `dockerd`. |
+| `RUNNER_SESSION_RETRIES` | No | `3` | Number of times to re-register after the runner exits with an error before the container exits. |
 
 Default runner labels are `ephemeral,docker,self-hosted`. GitHub also applies its own OS and architecture labels for the runner binary.
 
@@ -116,7 +117,11 @@ The plugins can carry Go module findings before Docker publishes rebuilt plugin 
 
 ## Cleanup
 
-The runner is registered as ephemeral and removed on container shutdown when possible. In host Docker socket mode, cleanup only removes containers and images labeled with `runner-owner=<NAME>`. Label job-created Docker resources if you want the cleanup pass to remove them.
+The runner is registered as ephemeral and removed on container shutdown when possible. After a container-engine or host crash, a restarted container reuses its matching local registration when GitHub still has it. If GitHub invalidates a new registration before the runner creates its session, the container re-registers up to `RUNNER_SESSION_RETRIES` times.
+
+Use a unique `NAME` for every concurrently running container. Two live containers with the same name can replace each other's GitHub registration.
+
+In host Docker socket mode, cleanup only removes containers and images labeled with `runner-owner=<NAME>`. Label job-created Docker resources if you want the cleanup pass to remove them.
 
 ## License
 
