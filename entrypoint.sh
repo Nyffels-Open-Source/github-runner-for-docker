@@ -9,6 +9,7 @@ HOSTDOCKER="${HOSTDOCKER:-0}"
 GITHUB_API_VERSION="${GITHUB_API_VERSION:-2022-11-28}"
 RUNNER_SESSION_RETRIES="${RUNNER_SESSION_RETRIES:-3}"
 RUNNER_CLEANUP_DOCKER="${RUNNER_CLEANUP_DOCKER:-1}"
+RUNNER_MAX_CLOCK_SKEW="${RUNNER_MAX_CLOCK_SKEW:-60}"
 
 export RUNNER_WORK_DIRECTORY="${RUNNER_WORK_DIRECTORY:-_work}"
 export ACTIONS_RUNNER_INPUT_REPLACE=true
@@ -83,6 +84,47 @@ api_get() {
 api_delete() {
   local url="$1"
   curl "${CURL_COMMON_OPTS[@]}" -X DELETE -H "${AUTH_HEADER}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" "${url}"
+}
+
+check_github_clock() {
+  local response_headers server_date server_epoch local_epoch offset skew direction
+
+  echo "Checking system clock against GitHub..."
+  if ! response_headers="$(curl -sS --connect-timeout 10 --max-time 30 \
+    -D - -o /dev/null https://api.github.com/)"; then
+    echo "WARN: Could not query GitHub time; continuing without a clock-skew check."
+    return 0
+  fi
+  server_date="$(awk '
+    tolower($1) == "date:" {
+      sub(/^[^:]+:[[:space:]]*/, "")
+      gsub(/\r$/, "")
+      value=$0
+    }
+    END { print value }
+  ' <<< "${response_headers}")"
+  if [[ -z "${server_date}" ]] || \
+     ! server_epoch="$(date -u -d "${server_date}" +%s 2>/dev/null)"; then
+    echo "WARN: GitHub did not return a usable Date header; continuing without a clock-skew check."
+    return 0
+  fi
+
+  local_epoch="$(date -u +%s)"
+  offset=$((local_epoch - server_epoch))
+  if (( offset < 0 )); then
+    skew=$((-offset))
+    direction="behind"
+  else
+    skew=${offset}
+    direction="ahead of"
+  fi
+
+  if (( skew > RUNNER_MAX_CLOCK_SKEW )); then
+    echo "ERROR: System clock is ${skew}s ${direction} GitHub; maximum allowed skew is ${RUNNER_MAX_CLOCK_SKEW}s."
+    echo "ERROR: Synchronize the Docker host clock with NTP, then restart this container."
+    return 1
+  fi
+  echo "System clock is synchronized with GitHub (skew: ${skew}s)."
 }
 
 fetch_registration_token() {
@@ -304,6 +346,10 @@ if [[ ! "${RUNNER_SESSION_RETRIES}" =~ ^[0-9]+$ ]]; then
   echo "ERROR: RUNNER_SESSION_RETRIES must be a non-negative integer"
   exit 1
 fi
+if [[ ! "${RUNNER_MAX_CLOCK_SKEW}" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: RUNNER_MAX_CLOCK_SKEW must be a non-negative integer"
+  exit 1
+fi
 if [[ "${RUNNER_WORK_DIRECTORY}" = /* || "/${RUNNER_WORK_DIRECTORY}/" == *"/../"* ]]; then
   echo "ERROR: RUNNER_WORK_DIRECTORY must be a relative path within /actions-runner"
   exit 1
@@ -317,6 +363,7 @@ trap cleanup EXIT
 
 # -- Runner install -------------------------------------------------------
 cd /actions-runner
+check_github_clock
 if [[ ! -f ./config.sh ]]; then
   echo "ERROR: config.sh not found in $(pwd). Exiting."
   ls -al || true

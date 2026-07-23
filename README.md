@@ -87,6 +87,7 @@ Mounting `/var/run/docker.sock` effectively grants root-equivalent access to the
 | `DOCKERD_ARGS` | No | | Extra flags passed to `dockerd`. |
 | `RUNNER_SESSION_RETRIES` | No | `3` | Number of times to re-register after the runner exits with an error before the container exits. |
 | `RUNNER_CLEANUP_DOCKER` | No | `1` | Remove all containers, images, volumes, networks, and build cache from the private Docker-in-Docker daemon after each job. |
+| `RUNNER_MAX_CLOCK_SKEW` | No | `60` | Maximum allowed clock difference from GitHub, in seconds. Startup stops before registration when the host clock exceeds this limit. |
 
 Default runner labels are `ephemeral,docker,self-hosted`. GitHub also applies its own OS and architecture labels for the runner binary.
 
