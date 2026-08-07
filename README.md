@@ -1,6 +1,6 @@
 # GitHub Actions Runner for Docker
 
-Run an ephemeral GitHub Actions organization runner in a Docker container. The image starts Docker-in-Docker by default and can also use a host Docker socket when explicitly configured.
+Run an ephemeral GitHub Actions runner for an organization or a single repository in a Docker container. Set `REPO` to target one repository within `ORG`; omit it to register an organization-wide runner. The image starts Docker-in-Docker by default and can also use a host Docker socket when explicitly configured.
 
 The image uses Ubuntu 26.04 LTS and pins the runner version at build time. Runner self-updates are disabled inside the container; rebuild the image regularly to pick up runner, operating-system, Node.js, npm, and Docker security updates.
 
@@ -37,6 +37,15 @@ docker run --restart unless-stopped \
   --env HOSTDOCKER=1 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -d nyffels/github-runner:latest
+
+# Single-repository runner (Docker-in-Docker mode)
+docker run --privileged --restart unless-stopped --user 0:0 \
+  --name github-runner-repo \
+  --env NAME=<NAME> \
+  --env ORG=<ORG> \
+  --env REPO=<REPO> \
+  --env PAT=<PAT> \
+  -d nyffels/github-runner:latest
 ```
 
 ### Docker Compose
@@ -65,6 +74,18 @@ services:
       HOSTDOCKER: "1"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+
+  runner-repo:
+    image: nyffels/github-runner:latest
+    container_name: github-runner-repo
+    privileged: true
+    user: "0:0"
+    restart: unless-stopped
+    environment:
+      NAME: "runner-repo"
+      ORG: "${ORG}"
+      REPO: "${REPO}"
+      PAT: "${PAT}"
 ```
 
 `--privileged` and `--user 0:0` are required for Docker-in-Docker mode so the container can start Docker daemon internals. They are not normally required for host-socket mode unless the host socket permissions require them.
@@ -76,7 +97,8 @@ Mounting `/var/run/docker.sock` effectively grants root-equivalent access to the
 | Variable | Required | Default | Description |
 |---|---:|---|---|
 | `ORG` | Yes | | GitHub organization name. |
-| `PAT` | Yes | | Token with permission to create organization runner registration and removal tokens. |
+| `REPO` | No | | Repository name within `ORG`. When set, registers the runner only for that repository; do not include `ORG/` or a slash. |
+| `PAT` | Yes | | Token permitted to manage self-hosted runners in the selected organization or repository scope. |
 | `NAME` | No | `<hostname>-ephemeral` | Runner name registered in GitHub. |
 | `HOSTDOCKER` | No | `0` | Set to `1`, `true`, `yes`, or `on` to use the mounted host Docker socket. |
 | `LABELS` | No | | Extra comma-separated or semicolon-separated runner labels. |
@@ -90,6 +112,8 @@ Mounting `/var/run/docker.sock` effectively grants root-equivalent access to the
 | `RUNNER_MAX_CLOCK_SKEW` | No | `60` | Maximum allowed clock difference from GitHub, in seconds. Startup stops before registration when the host clock exceeds this limit. |
 
 Default runner labels are `ephemeral,docker,self-hosted`. GitHub also applies its own OS and architecture labels for the runner binary.
+
+When `REPO` is omitted, the PAT must be permitted to manage organization runners. When it is set, the PAT must be permitted to manage self-hosted runners for that repository. Keep the token scoped to the selected organization or repository and grant only the GitHub Actions administration rights needed to create registration/removal tokens and manage stale runner registrations.
 
 ## Build
 

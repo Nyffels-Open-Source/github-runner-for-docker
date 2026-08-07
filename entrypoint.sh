@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 # -- Required/optional env ------------------------------------------------
 ORG="${ORG:-}"
+REPO="${REPO:-}"
 PAT="${PAT:-}"
 NAME="${NAME:-$(hostname)-ephemeral}"
 HOSTDOCKER="${HOSTDOCKER:-0}"
@@ -128,10 +129,10 @@ check_github_clock() {
 }
 
 fetch_registration_token() {
-  local api_url="https://api.github.com/orgs/${ORG}/actions/runners/registration-token"
+  local api_url="${RUNNERS_API_URL}/registration-token"
   local token
 
-  echo "Fetching registration token from org '${ORG}'..." >&2
+  echo "Fetching registration token for ${RUNNER_SCOPE}..." >&2
   echo "Api URL: ${api_url}" >&2
   token="$(api_post "${api_url}" | jq -r '.token // empty' 2>/dev/null || true)"
   if [[ -z "${token}" ]]; then
@@ -206,7 +207,7 @@ configure_runner() {
 
   echo "Configuring ephemeral runner..."
   ./config.sh \
-    --url "https://github.com/${ORG}" \
+    --url "${RUNNER_URL}" \
     --token "${registration_token}" \
     --name "${NAME}" \
     --work "${RUNNER_WORK_DIRECTORY}" \
@@ -316,7 +317,7 @@ cleanup() {
 
   if [[ -f /actions-runner/config.sh && -x /actions-runner/bin/Runner.Listener ]] && \
      [[ "${_runner_configured}" == "true" || -f /actions-runner/.runner ]]; then
-    REMOVE_TOKEN="$(api_post "https://api.github.com/orgs/${ORG}/actions/runners/remove-token" \
+    REMOVE_TOKEN="$(api_post "${RUNNERS_API_URL}/remove-token" \
       | jq -r '.token // empty' 2>/dev/null || true)"
 
     if [[ -n "${REMOVE_TOKEN}" ]]; then
@@ -342,6 +343,10 @@ if [[ -z "${ORG}" ]]; then
   echo "ERROR: ORG environment variable is not set"
   exit 1
 fi
+if [[ -n "${REPO}" ]] && [[ ! "${REPO}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "ERROR: REPO must be a single repository name containing only letters, numbers, '.', '_', or '-'"
+  exit 1
+fi
 if [[ ! "${RUNNER_SESSION_RETRIES}" =~ ^[0-9]+$ ]]; then
   echo "ERROR: RUNNER_SESSION_RETRIES must be a non-negative integer"
   exit 1
@@ -354,6 +359,17 @@ if [[ "${RUNNER_WORK_DIRECTORY}" = /* || "/${RUNNER_WORK_DIRECTORY}/" == *"/../"
   echo "ERROR: RUNNER_WORK_DIRECTORY must be a relative path within /actions-runner"
   exit 1
 fi
+
+if [[ -n "${REPO}" ]]; then
+  RUNNER_SCOPE="repository '${ORG}/${REPO}'"
+  RUNNER_URL="https://github.com/${ORG}/${REPO}"
+  RUNNERS_API_URL="https://api.github.com/repos/${ORG}/${REPO}/actions/runners"
+else
+  RUNNER_SCOPE="organization '${ORG}'"
+  RUNNER_URL="https://github.com/${ORG}"
+  RUNNERS_API_URL="https://api.github.com/orgs/${ORG}/actions/runners"
+fi
+echo "Using GitHub runner scope: ${RUNNER_SCOPE}"
 
 on_term() { echo "Caught TERM"; cleanup; exit 0; }
 on_int()  { echo "Caught INT";  cleanup; exit 130; }
@@ -402,9 +418,9 @@ export RUNNER_WORK_DIRECTORY="/actions-runner/${RUNNER_WORK_DIRECTORY}"
 clean_workspace
 
 # -- Stale runner deregistration ------------------------------------------
-echo "Checking GitHub for existing runner named '${NAME}'..."
+echo "Checking GitHub for existing runner named '${NAME}' in ${RUNNER_SCOPE}..."
 ENCODED_RUNNER_NAME="$(jq -rn --arg value "${NAME}" '$value | @uri')"
-if ! RUNNERS_JSON="$(api_get "https://api.github.com/orgs/${ORG}/actions/runners?name=${ENCODED_RUNNER_NAME}&per_page=100")"; then
+if ! RUNNERS_JSON="$(api_get "${RUNNERS_API_URL}?name=${ENCODED_RUNNER_NAME}&per_page=100")"; then
   echo "ERROR: Could not query existing GitHub runners; refusing to modify local registration state."
   exit 1
 fi
@@ -418,7 +434,7 @@ mapfile -t RUNNER_IDS < <(jq -r --arg NAME "$NAME" \
 if (( ${#RUNNER_IDS[@]} > 0 )); then
   for RUNNER_ID in "${RUNNER_IDS[@]}"; do
     echo "Found existing runner '${NAME}' (ID: ${RUNNER_ID}) on GitHub. Deregistering..."
-    if ! api_delete "https://api.github.com/orgs/${ORG}/actions/runners/${RUNNER_ID}"; then
+    if ! api_delete "${RUNNERS_API_URL}/${RUNNER_ID}"; then
       echo "ERROR: Could not deregister stale runner '${NAME}' (ID: ${RUNNER_ID}); refusing to replace it."
       exit 1
     fi
