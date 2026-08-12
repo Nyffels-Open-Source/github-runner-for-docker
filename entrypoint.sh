@@ -158,6 +158,17 @@ clean_workspace() {
   fi
 }
 
+clean_job_storage() {
+  local path
+  clean_workspace
+  echo "Cleaning job tool and package caches..."
+  for path in /opt/hostedtoolcache /root/.nuget /root/.npm /root/.cache; do
+    if [[ -d "${path}" ]]; then
+      find "${path:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    fi
+  done
+}
+
 show_runner_diagnostics() {
   local latest_log
   if [[ ! -d /actions-runner/_diag ]]; then
@@ -331,7 +342,7 @@ cleanup() {
     echo "INFO: Skip runner removal: runner binary not present or runner was never configured."
   fi
 
-  clean_workspace || true
+  clean_job_storage || true
 }
 
 # -- Guards ---------------------------------------------------------------
@@ -415,7 +426,7 @@ echo "Installed GitHub Actions runner version: $(./bin/Runner.Listener --version
 
 mkdir -p "/actions-runner/${RUNNER_WORK_DIRECTORY}"
 export RUNNER_WORK_DIRECTORY="/actions-runner/${RUNNER_WORK_DIRECTORY}"
-clean_workspace
+clean_job_storage
 
 # -- Stale runner deregistration ------------------------------------------
 echo "Checking GitHub for existing runner named '${NAME}' in ${RUNNER_SCOPE}..."
