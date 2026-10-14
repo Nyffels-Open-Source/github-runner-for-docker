@@ -28,6 +28,7 @@ RUN apt-get update && \
 
 # Install GitHub Actions runner (with checksum verification)
 WORKDIR /actions-runner
+COPY scripts/patch-npm-dependencies.mjs /tmp/patch-npm-dependencies.mjs
 RUN ARCH_SUFFIX="" && \
     NODE_ARCH="" && \
     if [ "${TARGETOS:-linux}" != "linux" ]; then \
@@ -63,6 +64,8 @@ RUN ARCH_SUFFIX="" && \
     tar -xJf "${NODE_TGZ}" --strip-components=1 -C /usr/local && \
     rm "${NODE_TGZ}" && \
     npm install -g "npm@${NPM_VERSION}" --no-audit --no-fund && \
+    node /tmp/patch-npm-dependencies.mjs && \
+    rm /tmp/patch-npm-dependencies.mjs && \
     npm cache clean --force && \
     node --version && npm --version
 

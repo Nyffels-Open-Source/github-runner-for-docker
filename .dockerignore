@@ -1,3 +1,5 @@
 *
 !Dockerfile
 !entrypoint.sh
+!scripts/
+!scripts/patch-npm-dependencies.mjs

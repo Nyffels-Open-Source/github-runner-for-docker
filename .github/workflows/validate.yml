@@ -50,5 +50,7 @@ jobs:
             docker compose version
             command -v pgrep
           '
+      - name: Test npm without network access
+        run: docker run --rm --network none -v "$PWD/tests:/tests:ro" --entrypoint bash runner-test /tests/npm.sh
       - name: Test runner lifecycle without GitHub access
         run: docker run --rm --network none -v "$PWD/tests:/tests:ro" --entrypoint bash runner-test /tests/entrypoint.sh

@@ -144,6 +144,8 @@ docker build --build-arg INSTALL_DOCKER_PLUGINS=false -t github-runner .
 
 The plugins can carry Go module findings before Docker publishes rebuilt plugin binaries. Use the opt-out build argument only if you do not run jobs that need Buildx or Compose inside the runner.
 
+The image applies exact, integrity-verified security patches to four dependencies in system npm: `brace-expansion` 5.0.12, `undici` 6.28.1, `ip-address` 10.7.1, and `postcss-selector-parser` 7.1.6. The patch step keeps npm's CLI version, refuses incompatible dependency changes, and retains installed versions that already meet the patch level. These pins need review when upgrading npm. The bundled .NET runtime and compiled Go dependencies still require updated vendor artifacts or a separately maintained source rebuild.
+
 ## Cleanup
 
 The runner is registered as ephemeral and removed on container shutdown when possible. The workspace, hosted tool cache, and root user NuGet, npm, and application caches are cleaned both at startup and shutdown, so a hard crash cannot leave the next job with data from the previous workspace. The private Docker-in-Docker daemon is also pruned at startup and after every run unless `RUNNER_CLEANUP_DOCKER=0`.

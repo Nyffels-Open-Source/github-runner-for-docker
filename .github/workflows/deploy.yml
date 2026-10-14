@@ -82,6 +82,7 @@ jobs:
         run: |
           docker pull "$IMAGE_REF"
           docker run --rm --network none --entrypoint bash "$IMAGE_REF" -ec 'test "$(bin/Runner.Listener --version)" = "$RUNNER_VERSION"; node --version; npm --version; docker --version'
+          docker run --rm --network none -v "$PWD/tests:/tests:ro" --entrypoint bash "$IMAGE_REF" /tests/npm.sh
           docker run --rm --network none -v "$PWD/tests:/tests:ro" --entrypoint bash "$IMAGE_REF" /tests/entrypoint.sh
       - name: Export tested digest
         env:
