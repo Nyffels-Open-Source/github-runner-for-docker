@@ -1,0 +1,53 @@
+name: Validate
+
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: ShellCheck
+        run: docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.11.0 entrypoint.sh scripts/*.sh tests/*.sh
+      - name: Actionlint
+        run: docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:1.7.12 -shellcheck=
+
+  smoke:
+    runs-on: ${{ matrix.host }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: ubuntu-24.04
+            arch: amd64
+          - host: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Build image
+        run: docker build --pull -t runner-test .
+      - name: Verify installed tools
+        run: |
+          docker run --rm --network none --entrypoint bash runner-test -ec '
+            test "$(bin/Runner.Listener --version)" = "$RUNNER_VERSION"
+            test "$(node --version)" = "v$NODE_VERSION"
+            test "$(npm --version)" = "$NPM_VERSION"
+            externals/node24/bin/node --version
+            docker --version
+            docker buildx version
+            docker compose version
+            command -v pgrep
+          '
+      - name: Test runner lifecycle without GitHub access
+        run: docker run --rm --network none -v "$PWD/tests:/tests:ro" --entrypoint bash runner-test /tests/entrypoint.sh

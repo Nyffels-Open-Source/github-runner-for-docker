@@ -3,180 +3,137 @@ name: Release to Docker
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
+    branches: [main]
+  schedule:
+    - cron: '30 3 * * 2'
 
 permissions:
   contents: read
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   IMAGE_NAME: nyffels/github-runner
-  PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
-  get_version:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ env.VERSION }}
-    steps:
-      - name: Set CalVer version
-        uses: Nyffels-IT/github-actions-calver-version-generator@v1.0.1
+  validate:
+    uses: ./.github/workflows/validate.yml
 
-      - name: Show version
-        run: 'echo "Version: ${{ env.VERSION }}"'
-
-  get_runner_version:
-    runs-on: ubuntu-latest
+  runner_version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
-      runner_version: ${{ steps.extract.outputs.version }}
+      version: ${{ steps.runner.outputs.version }}
     steps:
-      - name: Fetch latest GitHub Actions runner version
-        id: extract
-        shell: bash
+      - name: Resolve latest runner release
+        id: runner
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          version="$(curl -fsSL --retry 3 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/actions/runner/releases/latest | jq -r '.tag_name | ltrimstr("v")')"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
-          auth_args=()
-          if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-            auth_args=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-          fi
-
-          version="$(
-            curl -fsSL "${auth_args[@]}" \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              https://api.github.com/repos/actions/runner/releases/latest \
-              | jq -r '.tag_name | sub("^v"; "")'
-          )"
-
-          if [[ -z "$version" || "$version" == "null" ]]; then
-            echo "Could not determine latest runner version"
-            exit 1
-          fi
-
-          echo "Latest runner version: $version"
-          {
-            echo "version=$version"
-          } >> "$GITHUB_OUTPUT"
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: [get_version, get_runner_version]
+  build:
+    if: github.ref == 'refs/heads/main'
+    needs: [validate, runner_version]
+    runs-on: ${{ matrix.host }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: ubuntu-24.04
+            arch: amd64
+          - host: ubuntu-24.04-arm
+            arch: arm64
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          platforms: arm64
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Build and push release image
-        uses: docker/build-push-action@v6
+      - name: Build candidate image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
         with:
           context: .
           pull: true
+          no-cache: true
           push: true
-          platforms: ${{ env.PLATFORMS }}
+          platforms: linux/${{ matrix.arch }}
+          build-args: |
+            RUNNER_VERSION=${{ needs.runner_version.outputs.version }}
           sbom: true
           provenance: mode=max
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            RUNNER_VERSION=${{ needs.get_runner_version.outputs.runner_version }}
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ needs.get_version.outputs.version }}
-            ${{ env.IMAGE_NAME }}:latest
-
-  scan-trivy:
-    name: "Security: Trivy (${{ matrix.platform }})"
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    needs: [deploy, get_version]
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [linux/amd64, linux/arm64]
-    env:
-      IMAGE_REF: nyffels/github-runner:${{ needs.get_version.outputs.version }}
-      TRIVY_PLATFORM: ${{ matrix.platform }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Scan image
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          image-ref: ${{ env.IMAGE_REF }}
-          severity: LOW,MEDIUM,HIGH,CRITICAL
-          exit-code: "1"
-          trivyignores: .trivyignore
-
-  scan-scout:
-    name: "Security: Docker Scout (${{ matrix.platform }})"
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    needs: [deploy, get_version]
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [linux/amd64, linux/arm64]
-    env:
-      IMAGE_REF: nyffels/github-runner:${{ needs.get_version.outputs.version }}
-      PLATFORM: ${{ matrix.platform }}
-    steps:
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Install Docker Scout
+          tags: ${{ env.IMAGE_NAME }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+      - name: Test candidate lifecycle
+        env:
+          IMAGE_REF: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
         run: |
-          curl -fsSL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh | sh
-          docker scout version
+          docker pull "$IMAGE_REF"
+          docker run --rm --network none --entrypoint bash "$IMAGE_REF" -ec 'test "$(bin/Runner.Listener --version)" = "$RUNNER_VERSION"; node --version; npm --version; docker --version'
+          docker run --rm --network none -v "$PWD/tests:/tests:ro" --entrypoint bash "$IMAGE_REF" /tests/entrypoint.sh
+      - name: Scan candidate digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        env:
+          TRIVY_PLATFORM: linux/${{ matrix.arch }}
+        with:
+          version: v0.75.0
+          scanners: vuln
+          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Export scanned digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          retention-days: 1
+          if-no-files-found: error
 
-      - name: Scan image
-        shell: bash
+  promote:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: digest-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Promote scanned digests
         run: |
           set -euo pipefail
-
-          docker scout cves "$IMAGE_REF" --platform "$PLATFORM" --format sarif > scout.sarif || true
-
-          finding_count="$(jq '[.runs[].results[]?] | length' scout.sarif)"
-          echo "Docker Scout findings for ${PLATFORM}: ${finding_count}"
-
-          if [[ "$finding_count" -gt 0 ]]; then
-            echo "| CVE | Summary |"
-            echo "|---|---|"
-            jq -r '
-              .runs[].results[]?
-              | [(.ruleId // "n/a"), ((.message.text // "n/a") | gsub("[\r\n]+"; " ") | gsub("[|]"; "/"))]
-              | @tsv
-            ' scout.sarif \
-              | sort -u \
-              | while IFS=$'\t' read -r cve summary; do
-                  printf '| %s | %s |\n' "$cve" "$summary"
-                done
-            exit 1
-          fi
+          version="$(date -u +%Y.%m.%d).${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          sources=()
+          for digest_file in "$RUNNER_TEMP"/digests/*; do
+            digest="${digest_file##*/}"
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+            sources+=("${IMAGE_NAME}@sha256:${digest}")
+          done
+          [[ "${#sources[@]}" == 2 ]]
+          docker buildx imagetools create \
+            --tag "${IMAGE_NAME}:${version}" \
+            --tag "${IMAGE_NAME}:latest" \
+            "${sources[@]}"

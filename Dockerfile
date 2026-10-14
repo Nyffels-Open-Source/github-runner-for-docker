@@ -1,13 +1,13 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1
 
-FROM ubuntu:26.04
+FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Set arguments
-ARG RUNNER_VERSION=2.336.0
-ARG NODE_VERSION=24.15.0
-ARG NPM_VERSION=11.13.0
+ARG RUNNER_VERSION=2.338.0
+ARG NODE_VERSION=24.21.0
+ARG NPM_VERSION=12.2.0
 ARG INSTALL_DOCKER_PLUGINS=true
 ARG TARGETOS
 ARG TARGETARCH
@@ -22,7 +22,7 @@ ENV TZ=Etc/UTC
 RUN apt-get update && \
     ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && \
     apt-get full-upgrade -y && \
-    apt-get install -y --no-install-recommends ca-certificates curl git jq unzip xz-utils tzdata libicu78 && \
+    apt-get install -y --no-install-recommends ca-certificates curl git jq unzip xz-utils tzdata libicu78 procps && \
     dpkg-reconfigure -f noninteractive tzdata && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -47,30 +47,16 @@ RUN ARCH_SUFFIX="" && \
     echo "${CHECKSUM}  ${RUNNER_TGZ}" | sha256sum -c - && \
     tar xzf "${RUNNER_TGZ}" && \
     rm "${RUNNER_TGZ}" && \
-    if [ -d "/actions-runner/externals/node24" ]; then \
-      NODE_TGZ="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" && \
-      curl -fsSL -o "${NODE_TGZ}" "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_TGZ}" && \
-      NODE_CHECKSUM="$(curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" | awk "/ ${NODE_TGZ}\$/ {print \$1}")" && \
-      if [ -z "${NODE_CHECKSUM}" ]; then echo "Failed to resolve checksum for ${NODE_TGZ}"; exit 1; fi && \
-      echo "${NODE_CHECKSUM}  ${NODE_TGZ}" | sha256sum -c - && \
-      rm -rf /actions-runner/externals/node24/* && \
-      tar -xJf "${NODE_TGZ}" --strip-components=1 -C /actions-runner/externals/node24 && \
-      rm "${NODE_TGZ}" && \
-      rm -rf /actions-runner/externals/node24/include \
-             /actions-runner/externals/node24/share \
-             /actions-runner/externals/node24/lib/node_modules/corepack/shims ; \
-    fi && \
-    if [ -d "/actions-runner/externals/node24_alpine" ] && [ -d "/actions-runner/externals/node24" ]; then \
-      rm -rf /actions-runner/externals/node24_alpine/* && \
-      cp -a /actions-runner/externals/node24/. /actions-runner/externals/node24_alpine/ ; \
-    fi && \
-    for NODE_DIR in /actions-runner/externals/node*; do \
-      [ -d "${NODE_DIR}" ] || continue ; \
-      if [ -x "${NODE_DIR}/bin/node" ] && [ -f "${NODE_DIR}/lib/node_modules/npm/bin/npm-cli.js" ]; then \
-        "${NODE_DIR}/bin/node" "${NODE_DIR}/lib/node_modules/npm/bin/npm-cli.js" --prefix "${NODE_DIR}" install -g "npm@${NPM_VERSION}" --no-audit --no-fund && \
-        "${NODE_DIR}/bin/node" "${NODE_DIR}/lib/node_modules/npm/bin/npm-cli.js" cache clean --force || true ; \
-      fi ; \
-    done
+    NODE_TGZ="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" && \
+    curl -fsSL -o "${NODE_TGZ}" "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_TGZ}" && \
+    NODE_CHECKSUM="$(curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" | awk -v name="${NODE_TGZ}" '$2 == name {print $1}')" && \
+    test -n "${NODE_CHECKSUM}" && \
+    echo "${NODE_CHECKSUM}  ${NODE_TGZ}" | sha256sum -c - && \
+    tar -xJf "${NODE_TGZ}" --strip-components=1 -C /usr/local && \
+    rm "${NODE_TGZ}" && \
+    npm install -g "npm@${NPM_VERSION}" --no-audit --no-fund && \
+    npm cache clean --force && \
+    node --version && npm --version
 
 # Prevent mount errors by preparing dummy repo path
 RUN mkdir -p /actions-runner/_work/_dummy/_dummy
@@ -101,12 +87,13 @@ RUN apt-get update && \
     fi
 
 # Label image for traceability
-LABEL runner-owner="ephemeral-runner"
+LABEL org.opencontainers.image.source="https://github.com/Nyffels-Open-Source/github-runner-for-docker" \
+      org.opencontainers.image.licenses="MIT"
 
 STOPSIGNAL SIGTERM
 
 # Healthcheck to ensure runner container is alive
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD pgrep -f Runner.Listener || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 CMD pgrep -f Runner.Listener || exit 1
 
 # Copy entrypoint
 COPY --chmod=0755 entrypoint.sh /entrypoint.sh

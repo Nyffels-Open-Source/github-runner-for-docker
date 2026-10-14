@@ -5,6 +5,16 @@ set -Eeuo pipefail
 ORG="${ORG:-}"
 REPO="${REPO:-}"
 PAT="${PAT:-}"
+if [[ -n "${PAT_FILE:-}" ]]; then
+  if [[ -n "${PAT}" || ! -r "${PAT_FILE}" ]]; then
+    echo "ERROR: Set either PAT or a readable PAT_FILE"
+    exit 1
+  fi
+  PAT="$(< "${PAT_FILE}")"
+fi
+export -n PAT
+export DOCKER_HOST=unix:///var/run/docker.sock
+unset DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH
 NAME="${NAME:-$(hostname)-ephemeral}"
 HOSTDOCKER="${HOSTDOCKER:-0}"
 GITHUB_API_VERSION="${GITHUB_API_VERSION:-2022-11-28}"
@@ -13,7 +23,6 @@ RUNNER_CLEANUP_DOCKER="${RUNNER_CLEANUP_DOCKER:-1}"
 RUNNER_MAX_CLOCK_SKEW="${RUNNER_MAX_CLOCK_SKEW:-60}"
 
 export RUNNER_WORK_DIRECTORY="${RUNNER_WORK_DIRECTORY:-_work}"
-export ACTIONS_RUNNER_INPUT_REPLACE=true
 export RUNNER_ALLOW_RUNASROOT=1
 
 is_truthy() {
@@ -68,6 +77,7 @@ echo "Using runner labels: ${EFFECTIVE_LABELS}"
 _CLEANED_UP="false"
 _runner_pid=""
 _dockerd_pid=""
+_docker_ready="false"
 _runner_configured="false"
 AUTH_HEADER="Authorization: Bearer ${PAT}"
 CURL_COMMON_OPTS=(--retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 30 -fsSL)
@@ -223,7 +233,6 @@ configure_runner() {
     --name "${NAME}" \
     --work "${RUNNER_WORK_DIRECTORY}" \
     --unattended \
-    --replace \
     --ephemeral \
     --disableupdate \
     --labels "${EFFECTIVE_LABELS}"
@@ -244,13 +253,15 @@ wait_for_docker() {
 }
 
 start_dind() {
+  if [[ -S /var/run/docker.sock ]] && docker info >/dev/null 2>&1; then
+    echo "ERROR: An existing Docker daemon is reachable; set HOSTDOCKER=1 to use a mounted socket."
+    return 1
+  fi
   local driver="${DOCKER_DRIVER:-overlay2}"
   local data_root="${DOCKER_DATA_ROOT:-/var/lib/docker}"
   local -a extra_args=()
   if [[ -n "${DOCKERD_ARGS:-}" ]]; then
-    # Intentionally split DOCKERD_ARGS on shell word boundaries for CLI-style flags.
-    # shellcheck disable=SC2206
-    extra_args=( ${DOCKERD_ARGS} )
+    read -r -a extra_args <<< "${DOCKERD_ARGS}"
   fi
 
   mkdir -p /var/run /var/log "${data_root}"
@@ -318,7 +329,9 @@ cleanup() {
     fi
   fi
 
-  cleanup_docker_resources
+  if [[ "${_docker_ready}" == "true" ]]; then
+    cleanup_docker_resources
+  fi
 
   if [[ -n "${_dockerd_pid}" ]] && kill -0 "${_dockerd_pid}" 2>/dev/null; then
     echo "Stopping Docker daemon PID=${_dockerd_pid}..."
@@ -327,7 +340,7 @@ cleanup() {
   fi
 
   if [[ -f /actions-runner/config.sh && -x /actions-runner/bin/Runner.Listener ]] && \
-     [[ "${_runner_configured}" == "true" || -f /actions-runner/.runner ]]; then
+     [[ "${_runner_configured}" == "true" ]]; then
     REMOVE_TOKEN="$(api_post "${RUNNERS_API_URL}/remove-token" \
       | jq -r '.token // empty' 2>/dev/null || true)"
 
@@ -354,6 +367,10 @@ if [[ -z "${ORG}" ]]; then
   echo "ERROR: ORG environment variable is not set"
   exit 1
 fi
+if [[ ! "${ORG}" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]]; then
+  echo "ERROR: ORG must be a single GitHub organization or owner name"
+  exit 1
+fi
 if [[ -n "${REPO}" ]] && [[ ! "${REPO}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
   echo "ERROR: REPO must be a single repository name containing only letters, numbers, '.', '_', or '-'"
   exit 1
@@ -366,8 +383,17 @@ if [[ ! "${RUNNER_MAX_CLOCK_SKEW}" =~ ^[0-9]+$ ]]; then
   echo "ERROR: RUNNER_MAX_CLOCK_SKEW must be a non-negative integer"
   exit 1
 fi
-if [[ "${RUNNER_WORK_DIRECTORY}" = /* || "/${RUNNER_WORK_DIRECTORY}/" == *"/../"* ]]; then
-  echo "ERROR: RUNNER_WORK_DIRECTORY must be a relative path within /actions-runner"
+if [[ "${RUNNER_WORK_DIRECTORY}" = /* ]]; then
+  echo "ERROR: RUNNER_WORK_DIRECTORY must be relative to /actions-runner"
+  exit 1
+fi
+RUNNER_WORK_DIRECTORY="$(realpath -m "/actions-runner/${RUNNER_WORK_DIRECTORY}")"
+if [[ "${RUNNER_WORK_DIRECTORY}" != /actions-runner/* ||
+      "${RUNNER_WORK_DIRECTORY}" == /actions-runner/externals ||
+      "${RUNNER_WORK_DIRECTORY}" == /actions-runner/externals/* ||
+      "${RUNNER_WORK_DIRECTORY}" == /actions-runner/bin ||
+      "${RUNNER_WORK_DIRECTORY}" == /actions-runner/bin/* ]]; then
+  echo "ERROR: RUNNER_WORK_DIRECTORY must resolve to a workspace subdirectory of /actions-runner"
   exit 1
 fi
 
@@ -397,35 +423,13 @@ if [[ ! -f ./config.sh ]]; then
   exit 1
 fi
 
-RUNNER_VERSION="${RUNNER_VERSION:-2.336.0}"
-ARCH="$(uname -m)"
-case "$ARCH" in
-  x86_64|amd64) RUNNER_ARCH="linux-x64" ;;
-  aarch64|arm64) RUNNER_ARCH="linux-arm64" ;;
-  *) echo "ERROR: Unsupported arch: $ARCH"; exit 1 ;;
-esac
-
 if [[ ! -x ./bin/Runner.Listener ]]; then
-  echo "Downloading GitHub Actions runner ${RUNNER_VERSION} for ${RUNNER_ARCH}..."
-  RUNNER_TGZ="actions-runner-${RUNNER_ARCH}-${RUNNER_VERSION}.tar.gz"
-  curl -fsSL -o "${RUNNER_TGZ}" "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_TGZ}"
-  CHECKSUM="$(curl -fsSL "https://api.github.com/repos/actions/runner/releases/tags/v${RUNNER_VERSION}" | \
-    jq -r --arg name "${RUNNER_TGZ}" '.assets[] | select(.name==$name) | .digest // empty' | \
-    sed 's/^sha256://')"
-  if [[ -z "${CHECKSUM}" ]]; then
-    echo "ERROR: Failed to resolve checksum for ${RUNNER_TGZ} via GitHub API digests"
-    exit 1
-  fi
-  echo "${CHECKSUM}  ${RUNNER_TGZ}" | sha256sum -c -
-  tar xzf "${RUNNER_TGZ}" && rm "${RUNNER_TGZ}"
-  if [[ -x ./bin/installdependencies.sh ]]; then
-    ./bin/installdependencies.sh || true
-  fi
+  echo "ERROR: Runner binary is missing. Rebuild the image instead of downloading at startup."
+  exit 1
 fi
 echo "Installed GitHub Actions runner version: $(./bin/Runner.Listener --version)"
 
-mkdir -p "/actions-runner/${RUNNER_WORK_DIRECTORY}"
-export RUNNER_WORK_DIRECTORY="/actions-runner/${RUNNER_WORK_DIRECTORY}"
+mkdir -p "${RUNNER_WORK_DIRECTORY}"
 clean_job_storage
 
 # -- Stale runner deregistration ------------------------------------------
@@ -437,6 +441,10 @@ if ! RUNNERS_JSON="$(api_get "${RUNNERS_API_URL}?name=${ENCODED_RUNNER_NAME}&per
 fi
 if ! jq -e '.runners | type == "array"' >/dev/null 2>&1 <<< "${RUNNERS_JSON}"; then
   echo "ERROR: GitHub returned an invalid runner-list response; refusing to modify local registration state."
+  exit 1
+fi
+if jq -e --arg name "${NAME}" '.runners[] | select(.name == $name and (.status != "offline" or .busy == true))' >/dev/null <<< "${RUNNERS_JSON}"; then
+  echo "ERROR: A live runner already uses NAME=${NAME}; choose a unique name."
   exit 1
 fi
 mapfile -t RUNNER_IDS < <(jq -r --arg NAME "$NAME" \
@@ -482,6 +490,7 @@ else
     exit 1
   fi
 fi
+_docker_ready="true"
 cleanup_docker_resources
 
 # -- Configure & run ------------------------------------------------------
@@ -515,6 +524,13 @@ while true; do
   retry_delay=$((runner_attempt * 5))
   echo "WARN: Runner session failed; re-registering in ${retry_delay}s (retry ${runner_attempt}/${RUNNER_SESSION_RETRIES})..."
   sleep "${retry_delay}"
+  if [[ -f .runner ]]; then
+    REMOVE_TOKEN="$(api_post "${RUNNERS_API_URL}/remove-token" | jq -r '.token // empty')"
+    if [[ -z "${REMOVE_TOKEN}" ]] || ! ./config.sh remove --token "${REMOVE_TOKEN}"; then
+      echo "ERROR: Could not remove this runner registration before retrying."
+      exit "${runner_exit}"
+    fi
+  fi
   clear_local_runner_config
   _runner_configured="false"
   REG_TOKEN="$(fetch_registration_token)"

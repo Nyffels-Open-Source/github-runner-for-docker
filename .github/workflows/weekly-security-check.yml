@@ -10,87 +10,103 @@ permissions:
   issues: write
 
 concurrency:
-  group: nightly-security-check
+  group: weekly-security-check
   cancel-in-progress: true
 
 jobs:
-  nightly-security-check:
-    runs-on: ubuntu-latest
+  weekly-security-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     env:
       IMAGE_REF: nyffels/github-runner:latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+        with:
+          persist-credentials: false
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Pull latest published images
+      - name: Resolve published digest
         shell: bash
         run: |
           set -euo pipefail
-          docker pull --platform linux/amd64 "$IMAGE_REF"
-          docker pull --platform linux/arm64 "$IMAGE_REF"
+          digest="$(docker buildx imagetools inspect --format '{{json .Manifest}}' "$IMAGE_REF" | jq -r '.digest')"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "IMAGE_REF=${IMAGE_REF%:*}@${digest}" >> "$GITHUB_ENV"
 
       - name: Scan image with Trivy (linux/amd64)
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         env:
           TRIVY_PLATFORM: linux/amd64
         with:
+          version: v0.75.0
+          scanners: vuln
           image-ref: ${{ env.IMAGE_REF }}
           severity: LOW,MEDIUM,HIGH,CRITICAL
           format: json
-          output: trivy-nightly-linux-amd64.json
+          output: trivy-weekly-linux-amd64.json
           exit-code: "0"
-          trivyignores: .trivyignore
 
       - name: Scan image with Trivy (linux/arm64)
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         env:
           TRIVY_PLATFORM: linux/arm64
         with:
+          version: v0.75.0
+          scanners: vuln
           image-ref: ${{ env.IMAGE_REF }}
           severity: LOW,MEDIUM,HIGH,CRITICAL
           format: json
-          output: trivy-nightly-linux-arm64.json
+          output: trivy-weekly-linux-arm64.json
           exit-code: "0"
-          trivyignores: .trivyignore
 
       - name: Install Docker Scout
         run: |
-          curl -fsSL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh | sh
+          bash scripts/install-scout.sh
           docker scout version
 
       - name: Scan image with Docker Scout
         shell: bash
         run: |
           set -euo pipefail
-          docker scout cves "$IMAGE_REF" --platform linux/amd64 --format sarif > scout-nightly-linux-amd64.sarif || true
-          docker scout cves "$IMAGE_REF" --platform linux/arm64 --format sarif > scout-nightly-linux-arm64.sarif || true
+          docker scout cves "$IMAGE_REF" --platform linux/amd64 --format sarif > scout-weekly-linux-amd64.sarif
+          docker scout cves "$IMAGE_REF" --platform linux/arm64 --format sarif > scout-weekly-linux-arm64.sarif
 
-      - name: Generate nightly report
+      - name: Generate weekly report
         id: report
         shell: bash
         run: |
           set -euo pipefail
 
-          trivy_files=(trivy-nightly-linux-amd64.json trivy-nightly-linux-arm64.json)
-          scout_files=(scout-nightly-linux-amd64.sarif scout-nightly-linux-arm64.sarif)
+          for file in trivy-weekly-linux-*.json; do
+            jq -e 'type == "object" and (.SchemaVersion | type == "number")' "$file" >/dev/null
+          done
+          for file in scout-weekly-linux-*.sarif; do
+            jq -e '.version == "2.1.0" and (.runs | type == "array" and length > 0)' "$file" >/dev/null
+          done
+
+          trivy_files=(trivy-weekly-linux-amd64.json trivy-weekly-linux-arm64.json)
+          scout_files=(scout-weekly-linux-amd64.sarif scout-weekly-linux-arm64.sarif)
 
           TOTAL_COUNT="$(jq -s '[.[].Results[]?.Vulnerabilities[]?] | length' "${trivy_files[@]}")"
           HIGH_CRIT_COUNT="$(jq -s '[.[].Results[]?.Vulnerabilities[]? | select((.Severity // "") == "HIGH" or (.Severity // "") == "CRITICAL")] | length' "${trivy_files[@]}")"
           FIXABLE_COUNT="$(jq -s '[.[].Results[]?.Vulnerabilities[]? | select((.FixedVersion // "") != "" and ((.FixedVersion // "") | ascii_downcase) != "not fixed")] | length' "${trivy_files[@]}")"
           SCOUT_TOTAL_COUNT="$(jq -s '[.[].runs[]?.results[]?] | length' "${scout_files[@]}")"
-          ACTIONABLE_COUNT="$((FIXABLE_COUNT + HIGH_CRIT_COUNT + SCOUT_TOTAL_COUNT))"
+          ACTIONABLE_COUNT="$(jq -s '[.[].Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH" or .Severity == "CRITICAL" or ((.FixedVersion // "") != "" and ((.FixedVersion // "") | ascii_downcase) != "not fixed"))] | length' "${trivy_files[@]}")"
+          ACTIONABLE_COUNT="$((ACTIONABLE_COUNT + SCOUT_TOTAL_COUNT))"
 
           {
-            echo "<!-- nightly-security-report -->"
-            echo "# Nightly Security Report"
+            echo "<!-- weekly-security-report -->"
+            echo "# Weekly Security Report"
             echo ""
             echo "- Generated (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
+            echo "- Image: ${IMAGE_REF}"
             echo "- Platforms scanned: linux/amd64, linux/arm64"
             echo ""
             echo "## Trivy overview"
@@ -141,7 +157,7 @@ jobs:
             else
               echo "No Docker Scout findings in this run."
             fi
-          } > nightly-report.md
+          } > weekly-report.md
 
           {
             echo "total_count=${TOTAL_COUNT}"
@@ -151,41 +167,41 @@ jobs:
             echo "actionable_count=${ACTIONABLE_COUNT}"
           } >> "$GITHUB_OUTPUT"
 
-          cat nightly-report.md >> "$GITHUB_STEP_SUMMARY"
+          cat weekly-report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report artifacts
-        uses: actions/upload-artifact@v4
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: nightly-security-report
+          retention-days: 30
+          name: weekly-security-report
           path: |
-            trivy-nightly-*.json
-            scout-nightly-*.sarif
-            nightly-report.md
+            trivy-weekly-*.json
+            scout-weekly-*.sarif
+            weekly-report.md
 
       - name: Create or update GitHub issue
         if: ${{ steps.report.outputs.actionable_count != '0' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
         env:
-          REPORT_PATH: nightly-report.md
+          REPORT_PATH: weekly-report.md
         with:
           script: |
             const fs = require('fs');
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const title = 'Nightly Security Report (Automated)';
-            const titlePrefix = 'Nightly Security Report';
+            const title = 'Weekly Security Report (Automated)';
             const body = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
-            const assignee = context.actor;
 
-            const { data: issues } = await github.rest.issues.listForRepo({
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner,
               repo,
               state: 'open',
               per_page: 100
             });
 
-            const nightlyIssues = issues.filter(i => i.title.startsWith(titlePrefix));
-            const existing = nightlyIssues.find(i => i.title === title);
+            const weeklyIssues = issues.filter(i => !i.pull_request && i.user?.login === 'github-actions[bot]' && /<!-- (weekly|nightly)-security-report -->/.test(i.body ?? '') && /^(Weekly|Nightly) Security Report/.test(i.title));
+            const existing = weeklyIssues.find(i => i.title === title);
             let keptIssueNumber;
 
             if (existing) {
@@ -194,30 +210,28 @@ jobs:
                 repo,
                 issue_number: existing.number,
                 title,
-                body,
-                assignees: [assignee]
+                body
               });
               keptIssueNumber = existing.number;
-              core.info(`Updated issue #${existing.number} and assigned to ${assignee}`);
+              core.info(`Updated issue #${existing.number}`);
             } else {
               const created = await github.rest.issues.create({
                 owner,
                 repo,
                 title,
-                body,
-                assignees: [assignee]
+                body
               });
               keptIssueNumber = created.data.number;
-              core.info(`Created issue #${created.data.number} and assigned to ${assignee}`);
+              core.info(`Created issue #${created.data.number}`);
             }
 
-            const staleIssues = nightlyIssues.filter(i => i.number !== keptIssueNumber);
+            const staleIssues = weeklyIssues.filter(i => i.number !== keptIssueNumber);
             for (const issue of staleIssues) {
               await github.rest.issues.createComment({
                 owner,
                 repo,
                 issue_number: issue.number,
-                body: `Superseded by #${keptIssueNumber}. Closing older nightly report automatically.`
+                body: `Superseded by #${keptIssueNumber}. Closing older weekly report automatically.`
               });
 
               await github.rest.issues.update({
@@ -227,37 +241,36 @@ jobs:
                 state: 'closed'
               });
 
-              core.info(`Closed older nightly issue #${issue.number}`);
+              core.info(`Closed older weekly issue #${issue.number}`);
             }
 
-      - name: Close nightly issue when no actionable findings
+      - name: Close weekly issue when no actionable findings
         if: ${{ steps.report.outputs.actionable_count == '0' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
         with:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const titlePrefix = 'Nightly Security Report';
 
-            const { data: issues } = await github.rest.issues.listForRepo({
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner,
               repo,
               state: 'open',
               per_page: 100
             });
 
-            const nightlyIssues = issues.filter(i => i.title.startsWith(titlePrefix));
-            if (nightlyIssues.length === 0) {
-              core.info('No open nightly issues to close.');
+            const weeklyIssues = issues.filter(i => !i.pull_request && i.user?.login === 'github-actions[bot]' && /<!-- (weekly|nightly)-security-report -->/.test(i.body ?? '') && /^(Weekly|Nightly) Security Report/.test(i.title));
+            if (weeklyIssues.length === 0) {
+              core.info('No open weekly issues to close.');
               return;
             }
 
-            for (const issue of nightlyIssues) {
+            for (const issue of weeklyIssues) {
               await github.rest.issues.createComment({
                 owner,
                 repo,
                 issue_number: issue.number,
-                body: 'Nightly run found no actionable items across linux/amd64 and linux/arm64. Closing this issue automatically.'
+                body: 'Weekly run found no actionable items across linux/amd64 and linux/arm64. Closing this issue automatically.'
               });
 
               await github.rest.issues.update({
