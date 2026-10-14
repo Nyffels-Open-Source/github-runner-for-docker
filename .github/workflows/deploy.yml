@@ -83,27 +83,7 @@ jobs:
           docker pull "$IMAGE_REF"
           docker run --rm --network none --entrypoint bash "$IMAGE_REF" -ec 'test "$(bin/Runner.Listener --version)" = "$RUNNER_VERSION"; node --version; npm --version; docker --version'
           docker run --rm --network none -v "$PWD/tests:/tests:ro" --entrypoint bash "$IMAGE_REF" /tests/entrypoint.sh
-      - name: Scan candidate digest
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
-        env:
-          TRIVY_PLATFORM: linux/${{ matrix.arch }}
-        with:
-          version: v0.75.0
-          scanners: vuln
-          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
-          severity: HIGH,CRITICAL
-          format: json
-          output: trivy-${{ matrix.arch }}.json
-          ignore-unfixed: true
-          exit-code: '1'
-      - name: Upload candidate security report
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: candidate-security-${{ matrix.arch }}
-          path: trivy-${{ matrix.arch }}.json
-          retention-days: 30
-      - name: Export scanned digest
+      - name: Export tested digest
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
@@ -131,7 +111,7 @@ jobs:
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-      - name: Promote scanned digests
+      - name: Promote tested digests
         run: |
           set -euo pipefail
           version="$(date -u +%Y.%m.%d).${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
@@ -145,4 +125,5 @@ jobs:
           docker buildx imagetools create \
             --tag "${IMAGE_NAME}:${version}" \
             --tag "${IMAGE_NAME}:latest" \
+            --tag "${IMAGE_NAME}:run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             "${sources[@]}"

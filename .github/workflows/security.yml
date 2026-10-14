@@ -1,28 +1,32 @@
-name: Weekly Security Check
+name: Security Checks
 
 on:
   schedule:
     - cron: "30 2 * * 1"
   workflow_dispatch:
+  workflow_run:
+    workflows: [Release to Docker]
+    branches: [main]
+    types: [completed]
 
 permissions:
   contents: read
   issues: write
 
 concurrency:
-  group: weekly-security-check
+  group: security-check
   cancel-in-progress: true
 
 jobs:
-  weekly-security-check:
+  security-check:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      IMAGE_REF: nyffels/github-runner:latest
+      IMAGE_REF: ${{ github.event_name == 'workflow_run' && format('nyffels/github-runner:run-{0}-{1}', github.event.workflow_run.id, github.event.workflow_run.run_attempt) || 'nyffels/github-runner:latest' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-
         with:
           persist-credentials: false
 
@@ -78,7 +82,7 @@ jobs:
           docker scout cves "$IMAGE_REF" --platform linux/amd64 --format sarif > scout-weekly-linux-amd64.sarif
           docker scout cves "$IMAGE_REF" --platform linux/arm64 --format sarif > scout-weekly-linux-arm64.sarif
 
-      - name: Generate weekly report
+      - name: Generate security report
         id: report
         shell: bash
         run: |
@@ -103,7 +107,7 @@ jobs:
 
           {
             echo "<!-- weekly-security-report -->"
-            echo "# Weekly Security Report"
+            echo "# Runner Security Report"
             echo ""
             echo "- Generated (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
             echo "- Image: ${IMAGE_REF}"
@@ -174,7 +178,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           retention-days: 30
-          name: weekly-security-report
+          name: runner-security-report
           path: |
             trivy-weekly-*.json
             scout-weekly-*.sarif
@@ -190,7 +194,7 @@ jobs:
             const fs = require('fs');
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const title = 'Weekly Security Report (Automated)';
+            const title = 'Runner Security Report (Automated)';
             const body = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
 
             const issues = await github.paginate(github.rest.issues.listForRepo, {
@@ -200,7 +204,7 @@ jobs:
               per_page: 100
             });
 
-            const weeklyIssues = issues.filter(i => !i.pull_request && i.user?.login === 'github-actions[bot]' && /<!-- (weekly|nightly)-security-report -->/.test(i.body ?? '') && /^(Weekly|Nightly) Security Report/.test(i.title));
+            const weeklyIssues = issues.filter(i => !i.pull_request && i.user?.login === 'github-actions[bot]' && /<!-- (weekly|nightly)-security-report -->/.test(i.body ?? '') && /^(Runner|Weekly|Nightly) Security Report/.test(i.title));
             const existing = weeklyIssues.find(i => i.title === title);
             let keptIssueNumber;
 
@@ -231,7 +235,7 @@ jobs:
                 owner,
                 repo,
                 issue_number: issue.number,
-                body: `Superseded by #${keptIssueNumber}. Closing older weekly report automatically.`
+                body: `Superseded by #${keptIssueNumber}. Closing older security report automatically.`
               });
 
               await github.rest.issues.update({
@@ -244,7 +248,7 @@ jobs:
               core.info(`Closed older weekly issue #${issue.number}`);
             }
 
-      - name: Close weekly issue when no actionable findings
+      - name: Close security issue when no actionable findings
         if: ${{ steps.report.outputs.actionable_count == '0' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
         with:
@@ -259,9 +263,9 @@ jobs:
               per_page: 100
             });
 
-            const weeklyIssues = issues.filter(i => !i.pull_request && i.user?.login === 'github-actions[bot]' && /<!-- (weekly|nightly)-security-report -->/.test(i.body ?? '') && /^(Weekly|Nightly) Security Report/.test(i.title));
+            const weeklyIssues = issues.filter(i => !i.pull_request && i.user?.login === 'github-actions[bot]' && /<!-- (weekly|nightly)-security-report -->/.test(i.body ?? '') && /^(Runner|Weekly|Nightly) Security Report/.test(i.title));
             if (weeklyIssues.length === 0) {
-              core.info('No open weekly issues to close.');
+              core.info('No open security issues to close.');
               return;
             }
 
@@ -270,7 +274,7 @@ jobs:
                 owner,
                 repo,
                 issue_number: issue.number,
-                body: 'Weekly run found no actionable items across linux/amd64 and linux/arm64. Closing this issue automatically.'
+                body: 'Security scan found no actionable items across linux/amd64 and linux/arm64. Closing this issue automatically.'
               });
 
               await github.rest.issues.update({
