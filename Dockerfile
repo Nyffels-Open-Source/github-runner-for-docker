@@ -47,6 +47,14 @@ RUN ARCH_SUFFIX="" && \
     echo "${CHECKSUM}  ${RUNNER_TGZ}" | sha256sum -c - && \
     tar xzf "${RUNNER_TGZ}" && \
     rm "${RUNNER_TGZ}" && \
+    for NODE_DIR in /actions-runner/externals/node*; do \
+      [ -d "${NODE_DIR}" ] || continue ; \
+      rm -rf "${NODE_DIR}/lib/node_modules/npm" "${NODE_DIR}/lib/node_modules/corepack" && \
+      rm -f "${NODE_DIR}/bin/npm" "${NODE_DIR}/bin/npx" "${NODE_DIR}/bin/corepack" \
+            "${NODE_DIR}/bin/yarn" "${NODE_DIR}/bin/yarnpkg" \
+            "${NODE_DIR}/bin/pnpm" "${NODE_DIR}/bin/pnpx" || exit 1 ; \
+    done && \
+    rm -f /usr/bin/pebble && \
     NODE_TGZ="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" && \
     curl -fsSL -o "${NODE_TGZ}" "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_TGZ}" && \
     NODE_CHECKSUM="$(curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" | awk -v name="${NODE_TGZ}" '$2 == name {print $1}')" && \

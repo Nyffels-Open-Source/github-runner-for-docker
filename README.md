@@ -2,7 +2,7 @@
 
 Run an ephemeral GitHub Actions runner for an organization or a single repository in a Docker container. Set `REPO` to target one repository within `ORG`; omit it to register an organization-wide runner. The image starts Docker-in-Docker by default and can also use a host Docker socket when explicitly configured.
 
-The image uses Ubuntu 26.04 LTS and pins the runner version at build time. Current defaults are runner 2.338.0, Node.js 24.21.0 LTS, and npm 12.2.0. Node.js and npm are installed on `PATH` for shell jobs; GitHub's bundled action runtimes are preserved unchanged. Runner self-updates are disabled inside the container; rebuild the image regularly to pick up runner, operating-system, Node.js, npm, and Docker security updates.
+The image uses Ubuntu 26.04 LTS and pins the runner version at build time. Current defaults are runner 2.338.0, Node.js 24.21.0 LTS, and npm 12.2.0. Node.js and npm are installed on `PATH` for shell jobs; GitHub's bundled Node executables are preserved unchanged. Unused npm/Corepack copies bundled with those runtimes are removed; shell jobs use the system npm installation. The unused Pebble supervisor binary from the Ubuntu base is also removed. Runner self-updates are disabled inside the container; rebuild the image regularly to pick up runner, operating-system, Node.js, npm, and Docker security updates.
 
 ## Platform Support
 
@@ -162,7 +162,7 @@ For a security-grade clean environment, run one container per job and have an ex
 
 Pull requests run ShellCheck, Actionlint, native AMD64/ARM64 builds, tool-version checks, and isolated lifecycle tests. The tests mock GitHub and Docker commands and never register a real runner.
 
-Releases run on pushes to `main`, manual dispatches on `main`, and every Tuesday at 03:30 UTC. The release resolves the latest stable GitHub runner and rebuilds without a layer cache to refresh Ubuntu and Docker packages. It builds on native AMD64 and ARM64 hosts, publishes uniquely named candidate images, scans their exact digests with Trivy, and promotes those digests to CalVer and `latest` only after both scans pass. Candidate tags can contain vulnerabilities and are for validation only. Fixable HIGH/CRITICAL findings block promotion; findings without an upstream fix remain visible in the weekly report.
+Releases run on pushes to `main`, manual dispatches on `main`, and every Tuesday at 03:30 UTC. The release resolves the latest stable GitHub runner and rebuilds without a layer cache to refresh Ubuntu and Docker packages. It builds on native AMD64 and ARM64 hosts, publishes uniquely named candidate images, scans their exact digests with Trivy, and promotes those digests to CalVer and `latest` only after both scans pass. Candidate tags can contain vulnerabilities and are for validation only. Candidate scan JSON reports are retained for 30 days even when a security gate fails. Fixable HIGH/CRITICAL findings block promotion; findings without an upstream fix remain visible in the weekly report.
 
 The Monday security workflow scans one resolved `latest` digest on both architectures and stores reports for 30 days. Scanner failures stop report generation and issue closure. Reports cover all severities without blanket CVE exclusions. Automated issue updates target only marked reports created by `github-actions[bot]`.
 

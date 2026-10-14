@@ -43,7 +43,8 @@ jobs:
             test "$(bin/Runner.Listener --version)" = "$RUNNER_VERSION"
             test "$(node --version)" = "v$NODE_VERSION"
             test "$(npm --version)" = "$NPM_VERSION"
-            externals/node24/bin/node --version
+            externals/node20/bin/node -e "require(\"crypto\").createHash(\"sha256\").update(\"runner-smoke\").digest(\"hex\")"
+            externals/node24/bin/node -e "require(\"crypto\").createHash(\"sha256\").update(\"runner-smoke\").digest(\"hex\")"
             docker --version
             docker buildx version
             docker compose version
