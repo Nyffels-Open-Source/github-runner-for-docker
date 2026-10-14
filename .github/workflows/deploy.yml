@@ -69,13 +69,12 @@ jobs:
           context: .
           pull: true
           no-cache: true
-          push: true
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           platforms: linux/${{ matrix.arch }}
           build-args: |
             RUNNER_VERSION=${{ needs.runner_version.outputs.version }}
           sbom: true
           provenance: mode=max
-          tags: ${{ env.IMAGE_NAME }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
       - name: Test candidate lifecycle
         env:
           IMAGE_REF: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
@@ -113,9 +112,14 @@ jobs:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
       - name: Promote tested digests
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version="$(date -u +%Y.%m.%d).${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          created_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at')"
+          release_date="${created_at%%T*}"
+          [[ "$release_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+          version="${release_date//-/.}.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           sources=()
           for digest_file in "$RUNNER_TEMP"/digests/*; do
             digest="${digest_file##*/}"
@@ -126,5 +130,4 @@ jobs:
           docker buildx imagetools create \
             --tag "${IMAGE_NAME}:${version}" \
             --tag "${IMAGE_NAME}:latest" \
-            --tag "${IMAGE_NAME}:run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             "${sources[@]}"
